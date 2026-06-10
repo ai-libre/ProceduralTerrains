@@ -11,6 +11,7 @@ export default function PlanetStylePanel({
   planetStyle,
   planetPreset,
   palettePreset,
+  terrainSeed,
   onPlanetPreset,
   onRandomPlanet,
   onPalettePreset,
@@ -36,6 +37,7 @@ export default function PlanetStylePanel({
       <ColorPalettePanel
         planetStyle={style}
         palettePreset={palettePreset}
+        terrainSeed={terrainSeed}
         onPalettePreset={onPalettePreset}
         onGenerate={onGeneratePalette}
         onColorChange={onColorChange}

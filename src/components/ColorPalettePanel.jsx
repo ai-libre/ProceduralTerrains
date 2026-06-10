@@ -1,6 +1,36 @@
+import { useEffect, useState } from 'react';
 import { COLOR_PALETTE_PRESETS } from '../engine/style/ColorPalettePresets.js';
+import { PLANET_GEN_TYPES } from '../engine/style/ColorPaletteGenerator.js';
 import { PALETTE_KEYS, colorToHex, parseColor } from '../engine/style/ColorPalette.js';
 import { SliderCtl } from './controls.jsx';
+
+const COLOR_GROUPS = [
+  {
+    id: 'water',
+    label: 'Water',
+    keys: ['deep', 'shallow', 'foam'],
+  },
+  {
+    id: 'beach',
+    label: 'Beach',
+    keys: ['sand', 'dune'],
+  },
+  {
+    id: 'vegetation',
+    label: 'Vegetation',
+    keys: ['dryGrass', 'grass', 'forest', 'jungle', 'swamp', 'tundra'],
+  },
+  {
+    id: 'rock',
+    label: 'Rock',
+    keys: ['redRock', 'redRock2', 'rock', 'rockHi'],
+  },
+  {
+    id: 'snow',
+    label: 'Snow',
+    keys: ['snow'],
+  },
+];
 
 const COLOR_LABELS = {
   deep: 'Deep Water',
@@ -26,9 +56,62 @@ const TUNING_SCHEMA = [
   { key: 'paletteContrast', label: 'Contrast', min: 0.5, max: 1.8, step: 0.05, digits: 2 },
 ];
 
+function PaletteSwatch({ colorKey, rgb, onChange }) {
+  const hex = colorToHex(rgb ?? [0.5, 0.5, 0.5]);
+  return (
+    <label className="palette-color-row" title={COLOR_LABELS[colorKey]}>
+      <span className="palette-color-chip" style={{ background: hex }} />
+      <span className="palette-color-name">{COLOR_LABELS[colorKey]}</span>
+      <input
+        type="color"
+        className="palette-color-input"
+        value={hex}
+        onChange={(e) => onChange(colorKey, parseColor(e.target.value))}
+      />
+    </label>
+  );
+}
+
+function PaletteGroup({ group, palette, open, onToggle, onColorChange }) {
+  return (
+    <div className={`palette-group${open ? ' open' : ''}`}>
+      <button type="button" className="palette-group-header" onClick={onToggle} aria-expanded={open}>
+        <span className="palette-group-dots">
+          {group.keys.map((key) => (
+            <span
+              key={key}
+              className="palette-group-dot"
+              style={{ background: colorToHex(palette[key] ?? [0.5, 0.5, 0.5]) }}
+            />
+          ))}
+        </span>
+        <span className="palette-group-label">{group.label}</span>
+        <span className={`palette-group-chevron${open ? ' open' : ''}`} aria-hidden>
+          <svg viewBox="0 0 16 16" width="12" height="12">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" fill="none" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+        </span>
+      </button>
+      {open && (
+        <div className="palette-group-body">
+          {group.keys.map((key) => (
+            <PaletteSwatch
+              key={key}
+              colorKey={key}
+              rgb={palette[key]}
+              onChange={onColorChange}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ColorPalettePanel({
   planetStyle,
   palettePreset,
+  terrainSeed,
   onPalettePreset,
   onGenerate,
   onColorChange,
@@ -37,6 +120,31 @@ export default function ColorPalettePanel({
   onImport,
 }) {
   const palette = planetStyle?.palette ?? {};
+  const [genType, setGenType] = useState('random');
+  const [genSeed, setGenSeed] = useState(() => String(terrainSeed ?? Date.now()));
+  const [openGroups, setOpenGroups] = useState({ water: true, vegetation: true });
+
+  useEffect(() => {
+    if (terrainSeed != null) setGenSeed(String(terrainSeed));
+  }, [terrainSeed]);
+
+  const previewGradient = PALETTE_KEYS
+    .map((key) => colorToHex(palette[key] ?? [0.5, 0.5, 0.5]))
+    .join(', ');
+
+  const toggleGroup = (id) => {
+    setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const randomizeSeed = () => {
+    setGenSeed(String((Math.random() * 0xFFFFFFFF) >>> 0));
+  };
+
+  const handleGenerate = () => {
+    const parsed = parseInt(genSeed, 10);
+    const seed = Number.isFinite(parsed) ? parsed >>> 0 : Date.now();
+    onGenerate?.({ seed, type: genType });
+  };
 
   const handleImport = () => {
     const input = document.createElement('input');
@@ -60,8 +168,58 @@ export default function ColorPalettePanel({
 
   return (
     <div className="palette-block">
-      <div className="row">
-        <label>Palette</label>
+      {/* Preview strip */}
+      <div className="palette-preview-wrap">
+        <div className="palette-preview" style={{ background: `linear-gradient(90deg, ${previewGradient})` }} />
+        <span className="palette-preview-hint">{PALETTE_KEYS.length} biomes</span>
+      </div>
+
+      {/* Procedural generator */}
+      <div className="palette-generator">
+        <div className="palette-generator-head">
+          <span className="palette-generator-title">Procedural Generator</span>
+        </div>
+        <div className="row">
+          <label>Planet Type</label>
+          <select value={genType} onChange={(e) => setGenType(e.target.value)}>
+            {PLANET_GEN_TYPES.map(({ key, label }) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="seed-row">
+          <label>Seed</label>
+          <div className="seed-input-wrap">
+            <input
+              type="text"
+              value={genSeed}
+              onChange={(e) => setGenSeed(e.target.value)}
+              placeholder="Seed"
+            />
+            <button type="button" className="icon-btn" onClick={randomizeSeed} title="Random seed">
+              <svg viewBox="0 0 16 16" fill="none">
+                <rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.2" />
+                <circle cx="5" cy="5" r="0.9" fill="currentColor" />
+                <circle cx="11" cy="5" r="0.9" fill="currentColor" />
+                <circle cx="8" cy="8" r="0.9" fill="currentColor" />
+                <circle cx="5" cy="11" r="0.9" fill="currentColor" />
+                <circle cx="11" cy="11" r="0.9" fill="currentColor" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <button type="button" className="action-btn primary palette-generate-btn" onClick={handleGenerate}>
+          <svg viewBox="0 0 16 16" fill="none">
+            <path d="M8 2v4M8 10v4M2 8h4M10 8h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+            <circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.2" />
+          </svg>
+          Generate Planet
+        </button>
+      </div>
+
+      {/* Preset selector */}
+      <div className="row palette-preset-row">
+        <label>Preset</label>
         <select value={palettePreset} onChange={(e) => onPalettePreset(e.target.value)}>
           {Object.entries(COLOR_PALETTE_PRESETS).map(([key, p]) => (
             <option key={key} value={key}>{p.label}</option>
@@ -70,35 +228,48 @@ export default function ColorPalettePanel({
         </select>
       </div>
 
-      <button type="button" className="action-btn primary" onClick={onGenerate}>
-        Generate Palette
-      </button>
-
-      <div className="palette-swatches">
-        {PALETTE_KEYS.map((key) => (
-          <label key={key} className="palette-swatch" title={COLOR_LABELS[key]}>
-            <input
-              type="color"
-              value={colorToHex(palette[key] ?? [0.5, 0.5, 0.5])}
-              onChange={(e) => onColorChange(key, parseColor(e.target.value))}
-            />
-            <span>{COLOR_LABELS[key]}</span>
-          </label>
+      {/* Grouped color editor */}
+      <div className="palette-groups">
+        {COLOR_GROUPS.map((group) => (
+          <PaletteGroup
+            key={group.id}
+            group={group}
+            palette={palette}
+            open={!!openGroups[group.id]}
+            onToggle={() => toggleGroup(group.id)}
+            onColorChange={onColorChange}
+          />
         ))}
       </div>
 
-      {TUNING_SCHEMA.map((def) => (
-        <SliderCtl
-          key={def.key}
-          def={def}
-          value={planetStyle?.[def.key] ?? 1}
-          onChange={(v) => onTuning(def.key, v)}
-        />
-      ))}
+      {/* Tuning */}
+      <div className="palette-tuning">
+        {TUNING_SCHEMA.map((def) => (
+          <SliderCtl
+            key={def.key}
+            def={def}
+            value={planetStyle?.[def.key] ?? 1}
+            onChange={(v) => onTuning(def.key, v)}
+          />
+        ))}
+      </div>
 
+      {/* Import / Export */}
       <div className="palette-io">
-        <button type="button" className="action-btn" onClick={onExport}>Export Palette</button>
-        <button type="button" className="action-btn" onClick={handleImport}>Import Palette</button>
+        <button type="button" className="action-btn" onClick={onExport}>
+          <svg viewBox="0 0 16 16" fill="none">
+            <path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M3 13h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          </svg>
+          Export
+        </button>
+        <button type="button" className="action-btn" onClick={handleImport}>
+          <svg viewBox="0 0 16 16" fill="none">
+            <path d="M8 14V6M5 9l3-3 3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M3 3h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          </svg>
+          Import
+        </button>
       </div>
     </div>
   );

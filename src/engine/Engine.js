@@ -278,10 +278,13 @@ export class Engine {
     this.cb.onToast(`Noise: ${key}`);
   }
 
-  generatePalette() {
-    this.planetStyle.generatePalette(this.params.seed);
+  generatePalette(options = {}) {
+    const { style, meta } = this.planetStyle.generatePalette(this.params.seed, options);
+    this.params.planetStyle = style;
     this._notifyPlanetStyle();
-    this.cb.onToast('Palette generated');
+    const label = meta?.typeLabel ?? 'Procedural';
+    this.cb.onToast(`Planet generated: ${label}`);
+    return style;
   }
 
   randomizePlanetPreset() {

@@ -1,8 +1,19 @@
 import { PALETTE_KEYS, clonePalette, EARTH_PALETTE } from './ColorPalette.js';
 
 // ============================================================================
-// Procedural palette generator — CPU-side only, deterministic from seed.
+// Procedural planet generator — palette + atmosphere, deterministic from seed.
 // ============================================================================
+
+export const PLANET_GEN_TYPES = [
+  { key: 'random', label: 'Random' },
+  { key: 'earth', label: 'Earth-like' },
+  { key: 'alien', label: 'Alien' },
+  { key: 'desert', label: 'Desert' },
+  { key: 'ice', label: 'Ice' },
+  { key: 'toxic', label: 'Toxic' },
+  { key: 'volcanic', label: 'Volcanic' },
+  { key: 'fungal', label: 'Fungal' },
+];
 
 function mulberry32(a) {
   return function () {
@@ -31,27 +42,62 @@ function vary(rgb, rng, amount = 0.08) {
   return rgb.map((v) => Math.max(0, Math.min(1, v + (rng() - 0.5) * amount)));
 }
 
-/**
- * Generate a coherent alien/realistic palette from a seed.
- * @param {number} seed
- * @param {'alien'|'earth'|'random'} styleHint
- */
-export function generatePalette(seed = Date.now(), styleHint = 'random') {
-  const rng = mulberry32(seed >>> 0);
-  const styleRoll = styleHint === 'random' ? rng() : (styleHint === 'alien' ? 0.8 : 0.2);
+function clampRgb(rgb) {
+  return rgb.map((v) => Math.max(0, Math.min(1, v)));
+}
 
-  const baseHue = rng() * 360;
-  const isAlien = styleRoll > 0.45;
-  const sat = isAlien ? 0.45 + rng() * 0.45 : 0.25 + rng() * 0.35;
-  const lit = 0.35 + rng() * 0.25;
+function mixRgb(a, b, t) {
+  return clampRgb(a.map((v, i) => v * (1 - t) + b[i] * t));
+}
+
+const TYPE_PROFILES = {
+  earth: { hueBase: 200, hueSpread: 30, sat: [0.35, 0.65], lit: [0.35, 0.55], waterHue: -10 },
+  alien: { hueBase: null, hueSpread: 360, sat: [0.5, 0.9], lit: [0.3, 0.6], waterHue: -25 },
+  desert: { hueBase: 35, hueSpread: 20, sat: [0.4, 0.7], lit: [0.45, 0.7], waterHue: 15 },
+  ice: { hueBase: 205, hueSpread: 25, sat: [0.15, 0.45], lit: [0.55, 0.85], waterHue: 0 },
+  toxic: { hueBase: 110, hueSpread: 40, sat: [0.55, 0.85], lit: [0.35, 0.55], waterHue: -20 },
+  volcanic: { hueBase: 15, hueSpread: 25, sat: [0.2, 0.5], lit: [0.2, 0.45], waterHue: -5 },
+  fungal: { hueBase: 285, hueSpread: 30, sat: [0.4, 0.7], lit: [0.35, 0.6], waterHue: -15 },
+};
+
+const RESOLVED_TYPES = Object.keys(TYPE_PROFILES);
+
+function resolveType(typeHint, rng) {
+  if (typeHint && typeHint !== 'random' && TYPE_PROFILES[typeHint]) return typeHint;
+  return RESOLVED_TYPES[Math.floor(rng() * RESOLVED_TYPES.length)];
+}
+
+function range(rng, [lo, hi]) {
+  return lo + rng() * (hi - lo);
+}
+
+function buildPaletteFromProfile(profile, rng) {
+  const baseHue = profile.hueBase != null
+    ? profile.hueBase + (rng() - 0.5) * profile.hueSpread
+    : rng() * 360;
+  const sat = range(rng, profile.sat);
+  const lit = range(rng, profile.lit);
+  const waterHue = (baseHue + profile.waterHue) % 360;
 
   const hueOf = (offset, sMul = 1, lMul = 1) =>
-    hslToRgb((baseHue + offset) % 360, Math.min(1, sat * sMul), Math.max(0.05, Math.min(0.92, lit * lMul)));
+    hslToRgb(
+      (baseHue + offset) % 360,
+      Math.min(1, sat * sMul),
+      Math.max(0.05, Math.min(0.92, lit * lMul)),
+    );
+
+  const waterOf = (offset, sMul = 1, lMul = 1) =>
+    hslToRgb(
+      (waterHue + offset) % 360,
+      Math.min(1, sat * sMul),
+      Math.max(0.05, Math.min(0.92, lit * lMul)),
+    );
 
   const palette = clonePalette(EARTH_PALETTE);
 
-  palette.deep = vary(hueOf(-30, 1.2, 0.35), rng, 0.04);
-  palette.shallow = vary(hueOf(-15, 1.0, 0.55), rng, 0.05);
+  palette.deep = vary(waterOf(-20, 1.2, 0.35), rng, 0.04);
+  palette.shallow = vary(waterOf(-8, 1.0, 0.55), rng, 0.05);
+  palette.foam = vary(waterOf(5, 0.5, 0.88), rng, 0.03);
   palette.sand = vary(hueOf(25, 0.7, 1.15), rng, 0.06);
   palette.dune = vary(hueOf(30, 0.65, 1.2), rng, 0.05);
   palette.dryGrass = vary(hueOf(50, 0.8, 0.85), rng, 0.06);
@@ -65,18 +111,59 @@ export function generatePalette(seed = Date.now(), styleHint = 'random') {
   palette.rock = vary(hueOf(0, 0.15, 0.38), rng, 0.04);
   palette.rockHi = vary(hueOf(5, 0.12, 0.52), rng, 0.04);
   palette.snow = vary(hueOf(210, 0.08, 0.92), rng, 0.03);
-  palette.foam = vary(hueOf(200, 0.12, 0.90), rng, 0.03);
 
-  // Ensure all keys present
   for (const k of PALETTE_KEYS) {
     if (!palette[k]) palette[k] = [...EARTH_PALETTE[k]];
   }
 
-  return { palette, seed: seed >>> 0, alien: isAlien };
+  return palette;
+}
+
+function deriveAtmosphere(palette, type) {
+  const skyBase = mixRgb(palette.shallow, palette.deep, 0.35);
+  const skyLift = mixRgb(skyBase, [0.55, 0.65, 0.82], type === 'ice' ? 0.55 : 0.4);
+  const groundBase = mixRgb(palette.sand, palette.dryGrass, 0.5);
+  const groundDark = mixRgb(groundBase, palette.rock, 0.35);
+
+  return {
+    skyAmbient: clampRgb(skyLift),
+    groundBounce: clampRgb(groundDark),
+  };
+}
+
+/**
+ * Generate a full procedural planet palette + atmosphere from seed and type.
+ * @param {number} seed
+ * @param {string} typeHint — key from PLANET_GEN_TYPES or 'random'
+ */
+export function generateProceduralPlanet(seed = Date.now(), typeHint = 'random') {
+  const rng = mulberry32(seed >>> 0);
+  const type = resolveType(typeHint, rng);
+  const profile = TYPE_PROFILES[type];
+  const palette = buildPaletteFromProfile(profile, rng);
+  const atmosphere = deriveAtmosphere(palette, type);
+  const typeLabel = PLANET_GEN_TYPES.find((t) => t.key === type)?.label ?? type;
+
+  return {
+    palette,
+    skyAmbient: atmosphere.skyAmbient,
+    groundBounce: atmosphere.groundBounce,
+    seed: seed >>> 0,
+    type,
+    typeLabel,
+    alien: type === 'alien' || type === 'toxic' || type === 'fungal',
+  };
+}
+
+/** @deprecated Use generateProceduralPlanet */
+export function generatePalette(seed = Date.now(), styleHint = 'random') {
+  const hint = styleHint === 'alien' ? 'alien' : styleHint === 'earth' ? 'earth' : 'random';
+  const result = generateProceduralPlanet(seed, hint);
+  return { palette: result.palette, seed: result.seed, alien: result.alien };
 }
 
 /** Randomize palette using terrain seed for reproducibility. */
-export function generatePaletteFromTerrainSeed(terrainSeed) {
+export function generatePaletteFromTerrainSeed(terrainSeed, typeHint = 'random') {
   const sub = ((terrainSeed >>> 0) * 2654435761) >>> 0;
-  return generatePalette(sub, sub % 3 === 0 ? 'earth' : 'alien');
+  return generateProceduralPlanet(sub, typeHint);
 }

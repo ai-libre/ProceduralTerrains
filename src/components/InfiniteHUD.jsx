@@ -124,13 +124,13 @@ export default function InfiniteHUD({
       </div>
 
       {/* Return button */}
-      <button id="fps-return-btn" onClick={onReturn} title="Return to Terrain Studio">
+      {/* <button id="fps-return-btn" onClick={onReturn} title="Return to Terrain Studio">
         <svg viewBox="0 0 16 16" width="14" height="14">
           <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" stroke="currentColor" fill="none" strokeWidth="1.3" />
           <path d="M13.7 1.8v2.8h-2.8" stroke="currentColor" fill="none" strokeWidth="1.3" />
         </svg>
         Terrain Studio
-      </button>
+      </button> */}
     </>
   );
 }

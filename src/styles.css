@@ -478,7 +478,7 @@ body.preview-mode #bottom-toolbar { display: none; }
 
 /* ============ INFINITE MODE — SETTINGS PANEL ============ */
 #fps-settings-panel {
-  position: absolute; top: 62px; right: 18px; z-index: 15;
+  position: absolute; top: 18px; right: 18px; z-index: 15;
   display: none;
   background: var(--panel); backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);

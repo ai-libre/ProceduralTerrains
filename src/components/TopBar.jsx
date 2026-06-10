@@ -11,7 +11,7 @@ const Icon = ({ d, viewBox = '0 0 16 16', fill }) => (
 export default function TopBar({
   previewMode, worldMode, onNew, onRandomize, onSave, onLoadJSON,
   onExportScreenshot, onExportHeightmap, onTogglePreview,
-  onResetView, onToggleHelp, onOpenSettings, onToggleWorldMode,
+  onResetView, onToggleHelp, onOpenSettings, onOpenExport, onToggleWorldMode,
 }) {
   const [exportOpen, setExportOpen] = useState(false);
   const fileRef = useRef(null);
@@ -79,6 +79,7 @@ export default function TopBar({
             <svg className="caret" viewBox="0 0 8 8"><path d="M1.5 3 4 5.5 6.5 3" stroke="currentColor" fill="none" strokeWidth="1.2" /></svg>
           </button>
           <div className={`tb-menu${exportOpen ? ' open' : ''}`}>
+            <button onClick={onOpenExport}>3D Terrain Board (GLB/OBJ)...</button>
             <button onClick={onExportScreenshot}>Screenshot (PNG)</button>
             <button onClick={onExportHeightmap}>Heightmap (PNG)</button>
           </div>

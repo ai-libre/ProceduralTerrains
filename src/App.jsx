@@ -8,6 +8,7 @@ import BottomToolbar from './components/BottomToolbar.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import InfiniteHUD from './components/InfiniteHUD.jsx';
+import ExportModal from './components/ExportModal.jsx';
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -30,6 +31,7 @@ export default function App() {
   const [camMode, setCamMode] = useState('orbit');
   const [helpVisible, setHelpVisible] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -127,6 +129,7 @@ export default function App() {
         onResetView={() => engine().resetView()}
         onToggleHelp={() => setHelpVisible((v) => !v)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenExport={() => setExportModalOpen(true)}
         onToggleWorldMode={toggleWorldMode}
       />
 
@@ -204,6 +207,13 @@ export default function App() {
         onPerfPreset={handlePerfPreset}
         onPerfSetting={handlePerfSetting}
         onPerfReset={() => engine().resetPerfSettings()}
+      />
+
+      <ExportModal
+        open={exportModalOpen}
+        params={params}
+        onClose={() => setExportModalOpen(false)}
+        onExport={(options) => engine().export3DTerrain(options)}
       />
 
       <div id="toast" className={toast ? 'show' : ''}>{toast}</div>

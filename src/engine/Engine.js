@@ -14,6 +14,7 @@ import {
   applyPerfPreset, createPerfSettings, loadPerfSettings, savePerfSettings,
   sanitizePerfSettings, resolveLodSegments, resolveLodDistances,
 } from './render/PerformanceSettings.js';
+import { TerrainExporter } from './terrain/TerrainExporter.js';
 
 // ============================================================================
 // Terrain Studio engine. Framework-agnostic: owns the renderer/scene, the
@@ -732,6 +733,28 @@ export class Engine {
       this._download(URL.createObjectURL(blob), `heightmap-${this.params.seed}.png`);
       this.cb.onToast('Heightmap exported');
     });
+  }
+
+  async export3DTerrain(options) {
+    this.cb.onStatus('Preparing export...', true);
+    try {
+      await TerrainExporter.export(
+        this.renderer,
+        this.params,
+        this.uniforms,
+        this.boardSize,
+        options,
+        (msg) => {
+          this.cb.onStatus(msg, true);
+          this.cb.onToast(msg);
+        }
+      );
+    } catch (e) {
+      console.error(e);
+      this.cb.onToast('Export failed: ' + e.message);
+    } finally {
+      this.cb.onStatus('Ready', false);
+    }
   }
 
   // ------------------------------------------------------------- main loop

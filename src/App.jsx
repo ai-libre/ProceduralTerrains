@@ -37,6 +37,11 @@ export default function App() {
   const [worldMode, setWorldMode] = useState('studio');
   const [infiniteStats, setInfiniteStats] = useState(null);
 
+  // Infinite mode controls
+  const [qualityPreset, setQualityPreset] = useState('high');
+  const [timeOfDay, setTimeOfDay] = useState(0.38);
+  const [behindCameraCulling, setBehindCameraCulling] = useState(true);
+
   const showToast = useCallback((msg) => {
     setToast(msg);
     clearTimeout(toastTimer.current);
@@ -58,6 +63,8 @@ export default function App() {
         onToast: showToast,
         onFirstInteract: () => setHelpVisible(false),
         onInfiniteStats: setInfiniteStats,
+        onQualityChange: setQualityPreset,
+        onTimeOfDayChange: setTimeOfDay,
       },
     });
     engineRef.current = engine;
@@ -79,6 +86,21 @@ export default function App() {
     } else {
       showToast('Returned to Terrain Studio');
     }
+  };
+
+  const handleQualityChange = (key) => {
+    engine().setQuality(key);
+    setQualityPreset(key);
+  };
+
+  const handleTimeOfDay = (value) => {
+    engine().setTimeOfDay(value);
+    setTimeOfDay(value);
+  };
+
+  const handleBehindCameraCulling = (enabled) => {
+    engine().setBehindCameraCulling(enabled);
+    setBehindCameraCulling(enabled);
   };
 
   const isInfinite = worldMode === 'infinite';
@@ -147,11 +169,24 @@ export default function App() {
           <InfiniteHUD
             stats={infiniteStats}
             onReturn={toggleWorldMode}
+            quality={qualityPreset}
+            onQualityChange={handleQualityChange}
+            timeOfDay={timeOfDay}
+            onTimeOfDay={handleTimeOfDay}
+            behindCameraCulling={behindCameraCulling}
+            onBehindCameraCulling={handleBehindCameraCulling}
           />
         )}
       </div>
 
-      <StatusBar status={status} gpu={gpu} stats={stats} worldMode={worldMode} infiniteStats={infiniteStats} />
+      <StatusBar
+        status={status}
+        gpu={gpu}
+        stats={stats}
+        worldMode={worldMode}
+        infiniteStats={infiniteStats}
+        qualityPreset={isInfinite ? qualityPreset : null}
+      />
 
       <SettingsModal
         open={settingsOpen}

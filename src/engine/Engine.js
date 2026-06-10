@@ -7,6 +7,10 @@ import { EditorControls } from './EditorControls.js';
 import { FPSControls } from './FPSControls.js';
 import { Minimap } from './Minimap.js';
 import { DEFAULT_PARAMS, applyPreset } from './presets.js';
+import { ProceduralSky } from './sky/ProceduralSky.js';
+import { evaluateTimeOfDay } from './sky/TimeOfDay.js';
+import { FogManager } from './render/FogManager.js';
+import { getQualitySettings } from './render/QualitySettings.js';
 
 // ============================================================================
 // Terrain Studio engine. Framework-agnostic: owns the renderer/scene, the
@@ -20,6 +24,9 @@ import { DEFAULT_PARAMS, applyPreset } from './presets.js';
 //   onBoard(boardSize)
 //   onToast(message)
 //   onFirstInteract()
+//   onInfiniteStats(stats)      infinite mode HUD data
+//   onQualityChange(key)        quality preset changed
+//   onTimeOfDayChange(value)    time-of-day slider changed
 // ============================================================================
 
 // Deterministic PRNG used ONLY to derive noise-domain offsets from the seed.
@@ -65,6 +72,12 @@ export class Engine {
     this.fpsControls = null;
     this._infiniteTerrainMat = null;
     this._infiniteWaterMat = null;
+
+    // Infinite mode systems
+    this.proceduralSky = null;
+    this.fogManager = null;
+    this.qualityPreset = 'high';
+    this.timeOfDay = 0.38;         // default: morning
 
     this._initRenderer();
     this._initScene(minimapBase, minimapOverlay);
@@ -247,14 +260,18 @@ export class Engine {
     u.uEps.value = Math.max(0.35, size / 4096);
     u.uSkirtDepth.value = this._skirtDepth();
 
-    const az = p.sunAzimuth * Math.PI / 180;
-    const el = p.sunElevation * Math.PI / 180;
-    u.uSunDir.value.set(
-      Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)
-    ).normalize();
-    this.sunLight.position.copy(u.uSunDir.value).multiplyScalar(2000);
+    // In infinite mode, fog and sun are managed by FogManager + TimeOfDay.
+    // Only apply studio fog settings when NOT in infinite mode.
+    if (this.worldMode !== 'infinite') {
+      const az = p.sunAzimuth * Math.PI / 180;
+      const el = p.sunElevation * Math.PI / 180;
+      u.uSunDir.value.set(
+        Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)
+      ).normalize();
+      this.sunLight.position.copy(u.uSunDir.value).multiplyScalar(2000);
 
-    u.uFogDensity.value = p.fogDensity * 0.0001;
+      u.uFogDensity.value = p.fogDensity * 0.0001;
+    }
 
     // octave count is a compile-time constant (keeps loop bounds static for
     // the D3D11 shader compiler) — changing it triggers a quick recompile
@@ -325,6 +342,9 @@ export class Engine {
     this._studioFrequency = this.uniforms.uFrequency.value;
     this.uniforms.uFrequency.value = tileFreq;
 
+    // Get quality settings
+    const quality = getQualitySettings(this.qualityPreset);
+
     // Create infinite world
     this.infiniteWorld = new InfiniteWorld(
       this.scene,
@@ -332,12 +352,14 @@ export class Engine {
       this._infiniteWaterMat,
       {
         chunkSize: p.chunkSize,
-        viewRadius: 12,
+        viewRadius: quality.viewRadius,
         maxHeight: this._maxHeight(),
         skirtDepth: this._skirtDepth(),
         seaLevel: p.seaLevel,
       }
     );
+    this.infiniteWorld.setMaxCreatesPerFrame(quality.maxCreatesPerFrame);
+    this.infiniteWorld.setLodMultiplier(quality.lodMultiplier);
 
     // Create FPS controls
     this.fpsControls = new FPSControls(this.camera, this.canvas);
@@ -349,10 +371,27 @@ export class Engine {
     this.camera.far = 80000;
     this.camera.updateProjectionMatrix();
 
-    // Adjust fog for infinite world (lighter, further)
-    this.uniforms.uFogDensity.value = p.fogDensity * 0.00006;
+    // Create procedural sky
+    this.proceduralSky = new ProceduralSky(this.scene);
+
+    // Create fog manager
+    this.fogManager = new FogManager(this.uniforms, this.scene);
+    this.fogManager.setDensityMultiplier(quality.fogDensityMultiplier);
+    this.fogManager.updateFromViewDistance(quality.viewRadius, p.chunkSize);
+
+    // Apply time of day
+    this._applyTimeOfDay();
+
+    // Apply pixel ratio from quality
+    if (quality.pixelRatio > 0) {
+      this.renderer.setPixelRatio(quality.pixelRatio);
+    } else {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    }
 
     this.cb.onStatus('Infinite World', false);
+    if (this.cb.onQualityChange) this.cb.onQualityChange(this.qualityPreset);
+    if (this.cb.onTimeOfDayChange) this.cb.onTimeOfDayChange(this.timeOfDay);
   }
 
   _exitInfiniteMode() {
@@ -367,6 +406,15 @@ export class Engine {
       this.fpsControls.dispose();
       this.fpsControls = null;
     }
+
+    // Dispose procedural sky
+    if (this.proceduralSky) {
+      this.proceduralSky.dispose();
+      this.proceduralSky = null;
+    }
+
+    // Clear fog manager
+    this.fogManager = null;
 
     // Dispose infinite materials
     if (this._infiniteTerrainMat) {
@@ -386,6 +434,9 @@ export class Engine {
     // Restore uniforms
     this._applyUniforms();
 
+    // Restore scene background
+    this.scene.background = new THREE.Color(0x0b0e14);
+
     // Reset camera
     this.camera.fov = 45;
     this.camera.near = 1;
@@ -394,6 +445,95 @@ export class Engine {
     this.controls.reset(this.boardSize);
 
     this.cb.onStatus('Ready', false);
+  }
+
+  // -------------------------------------------------------- infinite controls
+
+  /**
+   * Set quality preset for infinite mode.
+   * @param {string} key — 'performance', 'balanced', 'high', 'ultra'
+   */
+  setQuality(key) {
+    this.qualityPreset = key;
+    const quality = getQualitySettings(key);
+
+    if (this.infiniteWorld) {
+      this.infiniteWorld.setViewRadius(quality.viewRadius);
+      this.infiniteWorld.setMaxCreatesPerFrame(quality.maxCreatesPerFrame);
+      this.infiniteWorld.setLodMultiplier(quality.lodMultiplier);
+    }
+
+    if (this.fogManager) {
+      this.fogManager.setDensityMultiplier(quality.fogDensityMultiplier);
+      this.fogManager.updateFromViewDistance(quality.viewRadius, this.params.chunkSize);
+      // Re-apply time of day to update fog color
+      if (this.proceduralSky) {
+        this._applyTimeOfDay();
+      }
+    }
+
+    // Apply pixel ratio
+    if (quality.pixelRatio > 0) {
+      this.renderer.setPixelRatio(quality.pixelRatio);
+    } else {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    }
+
+    if (this.cb.onQualityChange) this.cb.onQualityChange(key);
+  }
+
+  /**
+   * Set time of day (0..1).
+   * @param {number} value
+   */
+  setTimeOfDay(value) {
+    this.timeOfDay = Math.max(0, Math.min(1, value));
+    if (this.worldMode === 'infinite') {
+      this._applyTimeOfDay();
+    }
+    if (this.cb.onTimeOfDayChange) this.cb.onTimeOfDayChange(this.timeOfDay);
+  }
+
+  /**
+   * Toggle behind-camera culling for infinite mode.
+   */
+  setBehindCameraCulling(enabled) {
+    if (this.infiniteWorld) {
+      this.infiniteWorld.behindCameraCulling = enabled;
+    }
+  }
+
+  /**
+   * Apply time-of-day to sky, fog, and terrain lighting.
+   */
+  _applyTimeOfDay() {
+    const tod = evaluateTimeOfDay(this.timeOfDay);
+
+    // Update sky dome
+    if (this.proceduralSky) {
+      this.proceduralSky.updateFromTimeOfDay(tod);
+
+      // Compute sun direction from time-of-day angles
+      const az = tod.sunAzimuth * Math.PI / 180;
+      const el = tod.sunElevation * Math.PI / 180;
+      const sunDir = this.uniforms.uSunDir.value;
+      sunDir.set(
+        Math.cos(el) * Math.sin(az),
+        Math.sin(el),
+        Math.cos(el) * Math.cos(az)
+      ).normalize();
+      this.proceduralSky.setSunDirection(sunDir);
+      this.sunLight.position.copy(sunDir).multiplyScalar(2000);
+    }
+
+    // Update fog
+    if (this.fogManager) {
+      this.fogManager.updateFromTimeOfDay(tod);
+    }
+
+    // Update terrain sun light intensity and color
+    this.sunLight.intensity = tod.lightIntensity;
+    this.sunLight.color.setRGB(tod.sunColor[0], tod.sunColor[1], tod.sunColor[2]);
   }
 
   // ------------------------------------------------------------- save/load
@@ -550,9 +690,9 @@ export class Engine {
   _tickInfinite(dt, now) {
     if (this.fpsControls) this.fpsControls.update(dt);
 
-    // Stream chunks around the camera
+    // Stream chunks around the camera (with culling)
     if (this.infiniteWorld) {
-      this.infiniteWorld.update(this.camera.position);
+      this.infiniteWorld.update(this.camera.position, this.camera);
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -578,6 +718,8 @@ export class Engine {
           z: pos.z.toFixed(0),
           speed: fps ? fps.moveSpeed.toFixed(0) : '0',
           chunks: this.infiniteWorld ? this.infiniteWorld.activeChunkCount : 0,
+          visibleChunks: this.infiniteWorld ? this.infiniteWorld.visibleChunkCount : 0,
+          culledChunks: this.infiniteWorld ? this.infiniteWorld.culledChunkCount : 0,
           lodCounts: this.infiniteWorld ? [...this.infiniteWorld.lodCounts] : [0,0,0,0],
         });
       }

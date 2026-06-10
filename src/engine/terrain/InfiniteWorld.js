@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { buildChunkGeometry, setChunkBounds } from './ChunkGeometry.js';
+import { cullChunks } from './InfiniteTerrainCulling.js';
 
 // ============================================================================
 // InfiniteWorld: streams terrain chunks around the player camera.
@@ -9,7 +10,7 @@ import { buildChunkGeometry, setChunkBounds } from './ChunkGeometry.js';
 // ============================================================================
 
 const LOD_RESOLUTIONS = [64, 32, 16, 8];
-const MAX_CREATES_PER_FRAME = 6;         // throttle chunk creation
+const DEFAULT_MAX_CREATES = 6;
 
 export class InfiniteWorld {
   /**
@@ -33,13 +34,17 @@ export class InfiniteWorld {
     this.maxHeight = opts.maxHeight;
     this.skirtDepth = opts.skirtDepth;
     this.seaLevel = opts.seaLevel ?? 42;
+    this.maxCreatesPerFrame = DEFAULT_MAX_CREATES;
+
+    // Culling options
+    this.behindCameraCulling = true;
 
     // group contains all terrain chunks
     this.group = new THREE.Group();
     this.group.name = 'infinite-world';
     this.scene.add(this.group);
 
-    // water plane — large, follows player
+    // water plane — follows player, sized to match terrain radius
     this.waterPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(1, 1),
       this.waterMaterial
@@ -48,8 +53,7 @@ export class InfiniteWorld {
     this.waterPlane.renderOrder = 10;
     this.waterPlane.frustumCulled = false;
     this.waterPlane.position.y = this.seaLevel;
-    const waterSize = this.chunkSize * (this.viewRadius * 2 + 4);
-    this.waterPlane.scale.set(waterSize, 1, waterSize);
+    this._updateWaterSize();
     this.scene.add(this.waterPlane);
 
     // shared geometries per LOD
@@ -59,14 +63,12 @@ export class InfiniteWorld {
       return geo;
     });
 
-    // LOD distance thresholds (scale with chunk size)
-    this.lodThresholds = [
-      this.chunkSize * 4,
-      this.chunkSize * 8,
-      this.chunkSize * 14,
-    ];
+    // LOD distance thresholds (scale with chunk size and quality)
+    this._baseLodThresholds = [4, 8, 14]; // multiplied by chunkSize
+    this._lodMultiplier = 1.0;
+    this.lodThresholds = this._baseLodThresholds.map(m => m * this.chunkSize);
 
-    // chunk map: "cx,cz" -> { mesh, cx, cz, lod }
+    // chunk map: "cx,cz" -> { mesh, cx, cz, center, lod }
     this.chunks = new Map();
 
     // player chunk tracking
@@ -78,17 +80,76 @@ export class InfiniteWorld {
 
     // stats
     this.activeChunkCount = 0;
+    this.visibleChunkCount = 0;
+    this.culledChunkCount = 0;
     this.lodCounts = [0, 0, 0, 0];
 
     this._tmp = new THREE.Vector3();
   }
 
   /**
-   * Called each frame from Engine._tick(). Determines which chunks should
-   * exist, creates missing ones (throttled), removes distant ones, and
-   * updates LOD for all active chunks.
+   * Update water plane size to match terrain render distance.
+   * Water extends exactly to the terrain edge (viewRadius * 2 + 1 chunks)
+   * so it never renders beyond where terrain exists.
    */
-  update(playerPos) {
+  _updateWaterSize() {
+    const waterSize = this.chunkSize * (this.viewRadius * 2 + 1);
+    this.waterPlane.scale.set(waterSize, 1, waterSize);
+
+    // Update water fade distance uniforms (if available)
+    if (this.waterMaterial.uniforms.uWaterFadeStart) {
+      const fadeStart = waterSize * 0.42;
+      const fadeEnd = waterSize * 0.50;
+      this.waterMaterial.uniforms.uWaterFadeStart.value = fadeStart;
+      this.waterMaterial.uniforms.uWaterFadeEnd.value = fadeEnd;
+    }
+  }
+
+  /**
+   * Change the view radius at runtime (e.g. quality preset change).
+   * Recalculates chunk set, water size, and LOD thresholds without
+   * rebuilding chunk geometry.
+   */
+  setViewRadius(r) {
+    if (r === this.viewRadius) return;
+    this.viewRadius = r;
+    this._recalcLodThresholds();
+    this._updateWaterSize();
+    // Force recalc on next update
+    this._lastPlayerCX = Infinity;
+    this._lastPlayerCZ = Infinity;
+  }
+
+  /**
+   * Change the LOD distance multiplier (quality preset).
+   * Lower = chunks drop to low-detail sooner (better perf).
+   * Higher = chunks keep high-detail further out (better visuals).
+   */
+  setLodMultiplier(m) {
+    this._lodMultiplier = m;
+    this._recalcLodThresholds();
+  }
+
+  /** Recompute LOD thresholds from base × chunkSize × multiplier. */
+  _recalcLodThresholds() {
+    this.lodThresholds = this._baseLodThresholds.map(
+      m => m * this.chunkSize * this._lodMultiplier
+    );
+  }
+
+  /**
+   * Change max chunk creates per frame (performance tuning).
+   */
+  setMaxCreatesPerFrame(n) {
+    this.maxCreatesPerFrame = n;
+  }
+
+  /**
+   * Called each frame from Engine._tick(). Determines which chunks should
+   * exist, creates missing ones (throttled), removes distant ones, updates
+   * LOD, and culls invisible chunks.
+   */
+  update(playerPos, camera) {
     const cs = this.chunkSize;
     const pcx = Math.floor(playerPos.x / cs);
     const pcz = Math.floor(playerPos.z / cs);
@@ -109,6 +170,16 @@ export class InfiniteWorld {
 
     // Update LOD for all active chunks
     this._updateLOD(playerPos);
+
+    // Cull invisible chunks (frustum + behind-camera)
+    if (camera) {
+      const result = cullChunks(
+        this.chunks, camera, this.chunkSize,
+        this.maxHeight, this.behindCameraCulling
+      );
+      this.visibleChunkCount = result.visibleCount;
+      this.culledChunkCount = result.culledCount;
+    }
   }
 
   /**
@@ -153,11 +224,11 @@ export class InfiniteWorld {
   }
 
   /**
-   * Create a batch of pending chunks (up to MAX_CREATES_PER_FRAME).
+   * Create a batch of pending chunks (up to maxCreatesPerFrame).
    */
   _createPending() {
     let created = 0;
-    while (this._pendingChunks.length > 0 && created < MAX_CREATES_PER_FRAME) {
+    while (this._pendingChunks.length > 0 && created < this.maxCreatesPerFrame) {
       const { cx, cz } = this._pendingChunks.shift();
       const key = `${cx},${cz}`;
       if (this.chunks.has(key)) continue;  // already exists (edge case)

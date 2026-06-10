@@ -1,10 +1,22 @@
 // ============================================================================
 // Minimal HUD overlay for Infinite World Mode.
-// Shows crosshair, position, speed, chunk stats, and a return button.
+// Shows crosshair, position, speed, chunk stats, quality preset selector,
+// time-of-day slider, and a return button.
 // ============================================================================
 
-export default function InfiniteHUD({ stats, onReturn }) {
+import { formatTimeOfDay } from '../engine/sky/TimeOfDay.js';
+import { QUALITY_PRESETS, getQualityKeys } from '../engine/render/QualitySettings.js';
+
+export default function InfiniteHUD({
+  stats, onReturn,
+  quality, onQualityChange,
+  timeOfDay, onTimeOfDay,
+  behindCameraCulling, onBehindCameraCulling,
+}) {
   if (!stats) return null;
+
+  const qualityKeys = getQualityKeys();
+
   return (
     <>
       {/* Crosshair */}
@@ -30,7 +42,64 @@ export default function InfiniteHUD({ stats, onReturn }) {
         </div>
         <div className="fps-info-row">
           <span className="fps-info-label">CHUNKS</span>
-          <span className="fps-info-val">{stats.chunks}</span>
+          <span className="fps-info-val">
+            {stats.visibleChunks ?? stats.chunks}
+            <span className="fps-info-dim"> / {stats.chunks}</span>
+          </span>
+        </div>
+        {stats.culledChunks > 0 && (
+          <div className="fps-info-row">
+            <span className="fps-info-label">CULLED</span>
+            <span className="fps-info-val fps-info-culled">{stats.culledChunks}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Top-right controls panel */}
+      <div id="fps-settings-panel">
+        {/* Quality selector */}
+        <div className="fps-setting-row">
+          <span className="fps-setting-label">Quality</span>
+          <select
+            id="fps-quality-select"
+            className="fps-select"
+            value={quality}
+            onChange={(e) => onQualityChange(e.target.value)}
+          >
+            {qualityKeys.map((key) => (
+              <option key={key} value={key}>
+                {QUALITY_PRESETS[key].label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Time of day slider */}
+        <div className="fps-setting-row">
+          <span className="fps-setting-label">Time</span>
+          <span className="fps-setting-value">{formatTimeOfDay(timeOfDay)}</span>
+        </div>
+        <input
+          id="fps-tod-slider"
+          className="fps-slider"
+          type="range"
+          min="0"
+          max="1"
+          step="0.005"
+          value={timeOfDay}
+          style={{ '--fill': `${timeOfDay * 100}%` }}
+          onChange={(e) => onTimeOfDay(parseFloat(e.target.value))}
+        />
+
+        {/* Behind-camera culling toggle */}
+        <div className="fps-setting-row">
+          <span className="fps-setting-label">Back culling</span>
+          <button
+            type="button"
+            className={`toggle${behindCameraCulling ? ' on' : ''}`}
+            onClick={() => onBehindCameraCulling(!behindCameraCulling)}
+            aria-pressed={!!behindCameraCulling}
+          />
         </div>
       </div>
 

@@ -2,7 +2,7 @@ function fmtTris(n) {
   return n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${(n / 1e3).toFixed(0)}K`;
 }
 
-export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats }) {
+export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats, qualityPreset }) {
   return (
     <footer id="statusbar">
       <div className="sb-group">
@@ -13,9 +13,15 @@ export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats
         {worldMode === 'infinite' && infiniteStats && (
           <>
             <span className="sb-sep" />
-            <span>Chunks: {infiniteStats.chunks}</span>
+            <span>Visible: {infiniteStats.visibleChunks ?? infiniteStats.chunks} / {infiniteStats.chunks}</span>
             <span className="sb-sep" />
             <span>Speed: {infiniteStats.speed} u/s</span>
+            {qualityPreset && (
+              <>
+                <span className="sb-sep" />
+                <span className="sb-quality">{qualityPreset}</span>
+              </>
+            )}
           </>
         )}
       </div>

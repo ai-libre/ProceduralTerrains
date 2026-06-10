@@ -4,6 +4,8 @@ import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, HEIGHT_GLSL } from './terrainGLSL.js'
 // ============================================================================
 // Sea-level water plane. Shares the terrain uniforms + height function so
 // depth tint and shore foam line up exactly with the terrain underneath.
+// Adds distance-based edge fade to prevent water from rendering beyond
+// the terrain in infinite mode.
 // ============================================================================
 
 const VERTEX = /* glsl */ `
@@ -23,6 +25,8 @@ ${NOISE_GLSL}
 ${HEIGHT_GLSL}
 
 uniform float uWaterAnim;
+uniform float uWaterFadeStart;   // distance from camera where fade begins
+uniform float uWaterFadeEnd;     // distance from camera where water is fully transparent
 
 varying vec3 vWorldPos;
 
@@ -67,6 +71,13 @@ void main() {
 
   float alpha = clamp(0.50 + dGrade * 0.42 + fres * 0.15 + foam * 0.3, 0.0, 0.94);
 
+  // distance-based edge fade: smoothly fade water to transparent near the
+  // terrain render distance so water never extends beyond loaded terrain
+  float camDist = length(cameraPosition.xz - vWorldPos.xz);
+  float edgeFade = 1.0 - smoothstep(uWaterFadeStart, uWaterFadeEnd, camDist);
+  alpha *= edgeFade;
+  if (alpha < 0.01) discard;
+
   // fog + gamma (matches terrain material)
   float dist = length(cameraPosition - vWorldPos);
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
@@ -81,6 +92,8 @@ export function createWaterMaterial(sharedUniforms, octaves = 7) {
   const uniforms = {
     ...sharedUniforms,                 // share uniform OBJECTS with terrain
     uWaterAnim: { value: 1.0 },
+    uWaterFadeStart: { value: 99999.0 },  // studio mode: no fade
+    uWaterFadeEnd:   { value: 100000.0 },
   };
   const mat = new THREE.ShaderMaterial({
     uniforms,
@@ -99,6 +112,8 @@ export function createInfiniteWaterMaterial(sharedUniforms, octaves = 7) {
   const uniforms = {
     ...sharedUniforms,
     uWaterAnim: { value: 1.0 },
+    uWaterFadeStart: { value: 2000.0 },   // will be set by InfiniteWorld
+    uWaterFadeEnd:   { value: 2500.0 },
   };
   const mat = new THREE.ShaderMaterial({
     uniforms,

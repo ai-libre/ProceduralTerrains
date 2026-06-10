@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, HEIGHT_GLSL } from './terrainGLSL.js';
+import { BIOME_GLSL } from './biomeGLSL.js';
 
 // ============================================================================
 // Sea-level water plane. Shares the terrain uniforms + height function so
@@ -22,6 +23,7 @@ precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
+${BIOME_GLSL}
 ${HEIGHT_GLSL}
 
 uniform float uWaterAnim;

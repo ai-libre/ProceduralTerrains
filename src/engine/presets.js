@@ -24,6 +24,9 @@ export const DEFAULT_PARAMS = {
   // biome
   moistScale: 1.0,
   moistBias: 0.0,
+  biomeScale: 1.0,         // climate region frequency (higher = smaller regions)
+  tempBias: 0.0,           // global temperature shift (-1 polar .. +1 hot)
+  biomeDebug: false,       // visualize biome regions as flat colors
   snowLine: 0.7,
 
   // render
@@ -57,6 +60,7 @@ export const PRESETS = {
     params: {
       heightScale: 260, seaLevel: 78, falloff: 0.75, ridge: 0.45,
       warp: 1.4, noiseScale: 60, moistBias: 0.25, snowLine: 0.9,
+      tempBias: 0.25,
     },
   },
   alpine: {
@@ -64,6 +68,7 @@ export const PRESETS = {
     params: {
       heightScale: 640, seaLevel: 24, ridge: 0.92, warp: 0.6,
       noiseScale: 38, persistence: 0.52, snowLine: 0.48, moistBias: -0.1,
+      tempBias: -0.3,
     },
   },
   dunes: {
@@ -71,7 +76,7 @@ export const PRESETS = {
     params: {
       heightScale: 180, seaLevel: 4, ridge: 0.12, warp: 1.8,
       noiseScale: 55, persistence: 0.42, moistBias: -0.75, snowLine: 1.0,
-      falloff: 0.35,
+      falloff: 0.35, tempBias: 0.6,
     },
   },
   rolling: {
@@ -93,7 +98,7 @@ export const PRESETS = {
     params: {
       heightScale: 380, seaLevel: 12, ridge: 0.55, warp: 2.4,
       noiseScale: 42, persistence: 0.58, lacunarity: 2.4,
-      moistBias: -0.5, snowLine: 1.0, falloff: 0.3,
+      moistBias: -0.5, snowLine: 1.0, falloff: 0.3, tempBias: 0.35,
     },
   },
 };
@@ -106,7 +111,7 @@ export function applyPreset(params, presetKey) {
   for (const key of [
     'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'octaves',
     'persistence', 'lacunarity', 'ridge', 'warp', 'falloff',
-    'moistScale', 'moistBias', 'snowLine',
+    'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine',
   ]) next[key] = DEFAULT_PARAMS[key];
   Object.assign(next, preset.params);
   next.preset = presetKey;

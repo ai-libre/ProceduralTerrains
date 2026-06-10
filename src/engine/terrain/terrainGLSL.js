@@ -100,32 +100,66 @@ export const HEIGHT_GLSL = /* glsl */ `
 // ============================================================================
 // The terrain height field. Pure function of world XZ + uniforms — fully
 // deterministic for a given seed, never influenced by the camera.
-// Layers: domain warp -> base FBM -> ridged mountains gated by a mountain
-// mask -> island edge falloff.
+// Layers: climate-driven biome weights -> domain warp -> base FBM with
+// biome amplitude -> desert dunes -> ridged mountains gated by chain noise
+// AND climate -> wetland flattening -> canyon strata terracing -> island
+// edge falloff (studio mode only).
+// Requires BIOME_GLSL to be included first.
 // ============================================================================
-float heightAt(vec2 xz) {
-  vec2 p = xz * uFrequency + uSeedOffset;
 
-  // layer 1: domain warp (two low-octave FBM fields bend the domain)
+// Canyon/badlands strata: smooth terrace steps. C1-smooth so normals stay
+// clean; the canyon weight controls how strongly it is applied.
+float terrace(float h, float steps) {
+  float t = h * steps;
+  float s = smoothstep(0.20, 0.80, fract(t));
+  return (floor(t) + s) / steps;
+}
+
+// Height with an externally supplied climate sample. Callers that take
+// several nearby taps (finite-difference normals) reuse one climate sample;
+// the climate fields are far lower frequency than the tap epsilon, so the
+// approximation error is negligible.
+float shapeHeight(vec2 xz, Climate c) {
+  vec2 p = xz * uFrequency + uSeedOffset;
+  BiomeWeights bw = biomeWeightsAt(c);
+
+  // layer 1: domain warp (canyons reduce warp so strata stay crisp)
   vec2 w = vec2(
     fbm4(p + vec2(13.7, 41.3)),
     fbm4(p + vec2(87.2,  9.1))
   );
-  vec2 q = p + (w - 0.5) * uWarp;
+  vec2 q = p + (w - 0.5) * uWarp * (1.0 - bw.canyon * 0.5);
 
-  // layer 2: rolling base terrain
+  // layer 2: rolling base terrain, amplitude shaped per biome
   float base = fbm(q);
+  float baseAmp = 0.30 * (1.0 - bw.desert * 0.45) * (1.0 - bw.wetland * 0.75);
+  float h = base * baseAmp + 0.06;
 
-  // layer 3: ridged mountain chains, placed by a low-frequency mask
+  // layer 3: desert dunes — anisotropic ridge pattern, gentle amplitude
+  float dune = 1.0 - abs(vnoise(vec2(q.x * 2.2 + q.y * 0.4, q.y * 0.8) + vec2(311.7, 89.1)) * 2.0 - 1.0);
+  h += dune * dune * 0.05 * bw.desert;
+
+  // layer 4: ridged mountain chains — chain noise picks WHERE within a
+  // mountain-friendly climate; deserts and wetlands suppress them
   float ridge = ridgedFBM(q * 1.7 + vec2(31.4, 27.2));
-  float mountainMask = smoothstep(0.34, 0.66, fbm4(q * 0.35 + vec2(5.1, 17.7)));
+  float chain = smoothstep(0.34, 0.66, fbm4(q * 0.35 + vec2(5.1, 17.7)));
+  float mountains = chain * mix(0.35, 1.0, bw.mountains)
+                  * (1.0 - bw.desert * 0.85)
+                  * (1.0 - bw.wetland);
+  h += pow(ridge, 1.35) * mountains * uRidge * 1.15;
 
-  float h = base * 0.30 + 0.06;
-  h += pow(ridge, 1.35) * mountainMask * uRidge * 1.15;
   h *= uAmplitude;
 
+  // layer 5: wetlands settle just above sea level (after amplitude so they
+  // land at the true water line)
+  float sea01 = uSeaLevel / max(uHeightScale, 1.0);
+  h = mix(h, sea01 + 0.012 + base * 0.03, bw.wetland * 0.85);
+
+  // layer 6: canyon/badlands strata terracing
+  h = mix(h, terrace(h, 14.0), bw.canyon * 0.75);
+
 #ifndef INFINITE_MODE
-  // layer 4: island/continent falloff toward board edges (square+radial blend)
+  // layer 7: island/continent falloff toward board edges (square+radial blend)
   // Skipped in infinite mode — terrain continues without boundaries.
   vec2 e = abs(xz) / uBoardHalf;
   float edge = mix(max(e.x, e.y), length(e) * 0.7071, 0.5);
@@ -137,11 +171,12 @@ float heightAt(vec2 xz) {
   return clamp(h, 0.0, 1.35) * uHeightScale;
 }
 
-// Moisture field for biome blending (independent low-frequency layer).
-uniform float uMoistScale;
-uniform float uMoistBias;
+float heightAt(vec2 xz) {
+  return shapeHeight(xz, climateAt(xz * uFrequency + uSeedOffset));
+}
+
+// Moisture field for biome blending — now sourced from the climate system.
 float moistureAt(vec2 xz) {
-  vec2 p = xz * uFrequency * 0.35 * uMoistScale + uSeedOffset + vec2(91.7, 53.9);
-  return clamp(fbm4(p) + uMoistBias, 0.0, 1.0);
+  return climateAt(xz * uFrequency + uSeedOffset).moist;
 }
 `;

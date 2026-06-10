@@ -45,7 +45,8 @@ function mulberry32(a) {
 const SHAPE_KEYS = new Set([
   'seed', 'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'octaves',
   'persistence', 'lacunarity', 'ridge', 'warp', 'falloff',
-  'moistScale', 'moistBias', 'snowLine', 'chunkCount', 'chunkSize',
+  'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine',
+  'chunkCount', 'chunkSize',
 ]);
 
 const REBUILD_KEYS = new Set(['chunkCount', 'chunkSize']);
@@ -252,6 +253,9 @@ export class Engine {
     u.uChunkSize.value = p.chunkSize;
     u.uMoistScale.value = p.moistScale;
     u.uMoistBias.value = p.moistBias;
+    u.uBiomeScale.value = p.biomeScale;
+    u.uTempBias.value = p.tempBias;
+    u.uBiomeDebug.value = p.biomeDebug ? 1 : 0;
     u.uSnowLine.value = p.snowLine;
     u.uNormalStrength.value = p.normalStrength;
     u.uAO.value = p.aoStrength;

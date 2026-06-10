@@ -19,9 +19,12 @@ const CONTROL_SCHEMA = [
   { key: 'falloff', label: 'Island Falloff', min: 0.05, max: 1, step: 0.01, digits: 2 },
 
   { section: 'BIOME' },
+  { key: 'biomeScale', label: 'Biome Density', min: 0.3, max: 3, step: 0.05, digits: 2 },
+  { key: 'tempBias', label: 'Temperature', min: -1, max: 1, step: 0.05, digits: 2 },
   { key: 'moistScale', label: 'Moisture Scale', min: 0.2, max: 3, step: 0.05, digits: 2 },
   { key: 'moistBias', label: 'Moisture Bias', min: -1, max: 1, step: 0.05, digits: 2 },
   { key: 'snowLine', label: 'Snow Line', min: 0.2, max: 1, step: 0.01, digits: 2 },
+  { key: 'biomeDebug', label: 'Biome Debug', type: 'toggle' },
 
   { section: 'RENDER' },
   { key: 'normalStrength', label: 'Normal Strength', min: 0.2, max: 3, step: 0.05, digits: 2 },

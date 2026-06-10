@@ -203,6 +203,7 @@ export default function App() {
         perf={perf}
         onPerfPreset={handlePerfPreset}
         onPerfSetting={handlePerfSetting}
+        onPerfReset={() => engine().resetPerfSettings()}
       />
 
       <div id="toast" className={toast ? 'show' : ''}>{toast}</div>

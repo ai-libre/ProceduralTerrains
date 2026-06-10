@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { SliderCtl, ToggleRow, SelectRow } from './controls.jsx';
 import {
   PERF_PRESETS, PERF_LIMITS, getPerfPresetKeys,
@@ -44,6 +45,57 @@ function SubTitle({ children }) {
   return <div className="settings-subtitle">{children}</div>;
 }
 
+// One slider, four thumbs — one per LOD level. The 4 segment counts are
+// proportional, so dragging any thumb rescales the whole set by the same
+// factor. Positions use a log2 scale so 8/16/32/64 spread out evenly.
+function LodMultiSlider({ segments, onChange }) {
+  const trackRef = useRef(null);
+  const segmentsRef = useRef(segments);
+  segmentsRef.current = segments;
+
+  const { min, max } = PERF_LIMITS.lodSegment;
+  const lmin = Math.log2(min);
+  const lmax = Math.log2(max);
+  const toPos = (v) => ((Math.log2(v) - lmin) / (lmax - lmin)) * 100;
+
+  const startDrag = (e, i) => {
+    e.preventDefault();
+    const rect = trackRef.current.getBoundingClientRect();
+    const move = (ev) => {
+      const x = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+      const target = Math.pow(2, lmin + x * (lmax - lmin));
+      const cur = segmentsRef.current;
+      const factor = target / cur[i];
+      onChange(cur.map((s) =>
+        Math.round(Math.min(max, Math.max(min, s * factor)))
+      ));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  return (
+    <div className="ctl">
+      <div className="ctl-top">
+        <label>LOD Resolutions</label>
+        <span className="ctl-val lod-multi-val">{segments.join(' / ')}</span>
+      </div>
+      <div className="lod-multi-track" ref={trackRef}>
+        {segments.map((seg, i) => (
+          <div key={i} className="lod-multi-thumb" style={{ left: `${toPos(seg)}%` }}
+            onPointerDown={(e) => startDrag(e, i)} title={`LOD${i}: ${seg} segments`}>
+            <span className="lod-multi-tag">L{i}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PerfSlider({ perf, id, onPerfSetting }) {
   const def = PERF_SLIDERS[id];
   return (
@@ -52,7 +104,7 @@ function PerfSlider({ perf, id, onPerfSetting }) {
   );
 }
 
-export default function SettingsModal({ open, params, onParam, onClose, perf, onPerfPreset, onPerfSetting }) {
+export default function SettingsModal({ open, params, onParam, onClose, perf, onPerfPreset, onPerfSetting, onPerfReset }) {
   if (!open) return null;
 
   const presetOptions = [
@@ -64,11 +116,6 @@ export default function SettingsModal({ open, params, onParam, onClose, perf, on
   const distances = perf ? resolveLodDistances(perf) : [];
   const estTris = perf ? estimateTriangles(perf) : 0;
 
-  const setLodSegment = (i, v) => {
-    const next = [...perf.lodSegments];
-    next[i] = v;
-    onPerfSetting('lodSegments', next);
-  };
   const setLodDistance = (i, v) => {
     const next = [...perf.lodDistances];
     next[i] = v;
@@ -109,14 +156,8 @@ export default function SettingsModal({ open, params, onParam, onClose, perf, on
               <SubTitle>Terrain LOD</SubTitle>
               <PerfSlider perf={perf} id="resolutionScale" onPerfSetting={onPerfSetting} />
               <PerfSlider perf={perf} id="lodDistanceScale" onPerfSetting={onPerfSetting} />
-              {perf.lodSegments.map((seg, i) => (
-                <SliderCtl key={`seg${i}`}
-                  def={{
-                    label: `LOD${i} Segments`, min: PERF_LIMITS.lodSegment.min,
-                    max: PERF_LIMITS.lodSegment.max, step: 4,
-                  }}
-                  value={seg} onChange={(v) => setLodSegment(i, v)} />
-              ))}
+              <LodMultiSlider segments={perf.lodSegments}
+                onChange={(next) => onPerfSetting('lodSegments', next)} />
               <div className="perf-note">
                 Effective: {segments.join(' / ')} segments
               </div>
@@ -156,6 +197,10 @@ export default function SettingsModal({ open, params, onParam, onClose, perf, on
               <div className="perf-estimate">
                 Worst-case visible triangles: ~{(estTris / 1e6).toFixed(2)}M
               </div>
+
+              <button type="button" className="perf-reset-btn" onClick={onPerfReset}>
+                Reset Performance Settings
+              </button>
             </>
           )}
         </div>

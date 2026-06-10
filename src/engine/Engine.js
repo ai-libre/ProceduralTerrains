@@ -11,8 +11,8 @@ import { ProceduralSky } from './sky/ProceduralSky.js';
 import { evaluateTimeOfDay } from './sky/TimeOfDay.js';
 import { FogManager } from './render/FogManager.js';
 import {
-  applyPerfPreset, loadPerfSettings, savePerfSettings, sanitizePerfSettings,
-  resolveLodSegments, resolveLodDistances,
+  applyPerfPreset, createPerfSettings, loadPerfSettings, savePerfSettings,
+  sanitizePerfSettings, resolveLodSegments, resolveLodDistances,
 } from './render/PerformanceSettings.js';
 
 // ============================================================================
@@ -505,6 +505,16 @@ export class Engine {
     this.qualityPreset = this.perf.preset;
     this._applyPerformance();
     this._notifyPerf();
+  }
+
+  /** Reset all performance settings to the default High preset. */
+  resetPerfSettings() {
+    this.perf = createPerfSettings('high');
+    this.qualityPreset = this.perf.preset;
+    this._autoScale = 1.0;
+    this._applyPerformance();
+    this._notifyPerf();
+    this.cb.onToast('Performance settings reset');
   }
 
   _notifyPerf() {

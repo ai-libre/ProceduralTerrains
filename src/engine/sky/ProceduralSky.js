@@ -81,9 +81,13 @@ void main() {
   // ---- Night: add stars when sun is below horizon ----
   float nightFactor = smoothstep(0.15, -0.1, uSkySunDir.y);
   if (nightFactor > 0.01 && y > 0.0) {
-    // Simple pseudo-random stars from direction
+    // Simple pseudo-random stars from direction.
+    // Hash keeps intermediate values small so it stays stable on all GPUs
+    // (sin-of-large-number hashes break down and band on ANGLE/mobile).
     vec3 starGrid = floor(dir * 300.0);
-    float starHash = fract(sin(dot(starGrid.xy + starGrid.z * 43.17, vec2(127.1, 311.7))) * 43758.5453);
+    vec3 p = fract(starGrid * vec3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    float starHash = fract((p.x + p.y) * p.z);
     float star = step(0.998, starHash) * pow(max(y, 0.0), 0.3);
     // Twinkle using a second hash
     float twinkle = 0.7 + 0.3 * sin(starHash * 6283.0 + starGrid.x * 0.5);

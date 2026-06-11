@@ -94,6 +94,7 @@ export function createPerfSettings(presetKey = 'high') {
   return sanitizePerfSettings({
     preset: PERF_PRESETS[presetKey] ? presetKey : 'high',
     autoPerf: false,
+    underwaterEffect: true,
     lodSegments: [...BASE_LOD_SEGMENTS],
     lodDistances: [...BASE_LOD_DISTANCES],
     ...values,
@@ -186,6 +187,8 @@ export function sanitizePerfSettings(settings) {
   s.waterDistance = clamp(+s.waterDistance || 1, PERF_LIMITS.waterDistance);
   s.fogDistance = clamp(+s.fogDistance || 1, PERF_LIMITS.fogDistance);
   s.autoPerf = !!s.autoPerf;
+  // underwater camera effect — only costs anything while submerged
+  s.underwaterEffect = s.underwaterEffect !== false;
 
   const segSrc = Array.isArray(s.lodSegments) ? s.lodSegments : BASE_LOD_SEGMENTS;
   s.lodSegments = BASE_LOD_SEGMENTS.map((def, i) =>

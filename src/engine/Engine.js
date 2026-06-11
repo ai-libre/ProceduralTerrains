@@ -10,6 +10,7 @@ import { DEFAULT_PARAMS, applyPreset } from './presets.js';
 import { ProceduralSky } from './sky/ProceduralSky.js';
 import { evaluateTimeOfDay } from './sky/TimeOfDay.js';
 import { FogManager } from './render/FogManager.js';
+import { UnderwaterEffect } from './render/UnderwaterEffect.js';
 import {
   applyPerfPreset, createPerfSettings, loadPerfSettings, savePerfSettings,
   sanitizePerfSettings, resolveLodSegments, resolveLodDistances,
@@ -73,6 +74,12 @@ export class Engine {
     this._fps = 0;
     this._clock = new THREE.Clock();
     this._disposed = false;
+    // Async shader compilation state (KHR_parallel_shader_compile):
+    // while > 0, ticks skip rendering so nothing forces a blocking link.
+    this._compiling = 0;
+    this._octToken = 0;
+    this._matTrash = [];         // warm materials kept alive until programs are acquired
+    this._warmGeo = new THREE.PlaneGeometry(1, 1);
     this.planetStyle = new PlanetStyleManager();
 
     // World mode: 'studio' (single board) or 'infinite'
@@ -108,6 +115,11 @@ export class Engine {
     this._resizeObserver = new ResizeObserver(() => this._onResize());
     this._resizeObserver.observe(canvas.parentElement);
     this._onResize();
+
+    // Compile all shader programs in the background before the first render.
+    // The first frame would otherwise block the main thread for the full
+    // FXC/ANGLE compile of the terrain FBM shaders.
+    this._warmupInitialShaders();
 
     this.renderer.setAnimationLoop(() => this._tick());
   }
@@ -161,6 +173,9 @@ export class Engine {
     this.scene.add(new THREE.AmbientLight(0x4a5568, 0.5));
 
     this.minimap = new Minimap(this.renderer, this.scene, minimapBase, minimapOverlay);
+
+    // camera-underwater post effect (inactive above water — zero cost)
+    this.underwater = new UnderwaterEffect();
   }
 
   _initControls() {
@@ -441,13 +456,11 @@ export class Engine {
     }
 
     // octave count is a compile-time constant (keeps loop bounds static for
-    // the D3D11 shader compiler) — changing it triggers a quick recompile
+    // the D3D11 shader compiler) — changing it requires new programs, which
+    // are compiled in the background and swapped in when ready (no freeze)
     const oct = Math.round(p.octaves);
     if (this.terrainMaterial.defines.OCTAVES !== oct) {
-      this.terrainMaterial.defines.OCTAVES = oct;
-      this.terrainMaterial.needsUpdate = true;
-      this.waterMaterial.defines.OCTAVES = oct;
-      this.waterMaterial.needsUpdate = true;
+      this._setOctavesAsync(oct);
     }
 
     this.terrainMaterial.wireframe = p.wireframe;
@@ -469,6 +482,96 @@ export class Engine {
     const base = legacy > 0 ? legacy : Math.min(window.devicePixelRatio, 2);
     const scale = (this.perf?.renderScale ?? 1) * this._autoScale;
     this.renderer.setPixelRatio(Math.min(2, Math.max(0.3, base * scale)));
+  }
+
+  // -------------------------------------------------- async shader compiling
+  // All heavy shaders (terrain/water FBM) are compiled via compileAsync so
+  // the GPU driver links them off the main thread (KHR_parallel_shader_compile)
+  // while ticks keep running without rendering. Each shader needs TWO program
+  // variants: the canvas one and the render-target one (different program
+  // cache key — linear output color space) used by the underwater pass.
+
+  /** Compile materials for both output variants without blocking. */
+  async _compileMaterialVariants(mats) {
+    const group = new THREE.Group();
+    for (const m of mats) group.add(new THREE.Mesh(this._warmGeo, m));
+
+    // canvas variant (targetScene = real scene so light counts match)
+    await this.renderer.compileAsync(group, this.camera, this.scene);
+
+    // render-target variant (used when the underwater pass is active)
+    this.underwater._ensureTarget(this.renderer);
+    this.renderer.setRenderTarget(this.underwater._rt);
+    const pending = this.renderer.compileAsync(group, this.camera, this.scene);
+    this.renderer.setRenderTarget(null);
+    await pending;
+  }
+
+  /** Initial warmup: everything in the studio scene + the underwater pass. */
+  async _warmupInitialShaders() {
+    this._compiling++;
+    this.cb.onStatus('Compiling shaders…', true);
+    try {
+      await this.renderer.compileAsync(this.scene, this.camera);
+
+      this.underwater._ensureTarget(this.renderer);
+      this.renderer.setRenderTarget(this.underwater._rt);
+      const pending = this.renderer.compileAsync(this.scene, this.camera);
+      this.renderer.setRenderTarget(null);
+      await pending;
+
+      // underwater fullscreen compositing shader
+      await this.renderer.compileAsync(
+        this.underwater._quadScene, this.underwater._quadCam
+      );
+    } catch (e) {
+      console.warn('Shader warmup failed (falling back to sync compile)', e);
+    }
+    this._compiling--;
+    if (!this._disposed && !this._compiling) this.cb.onStatus('Ready', false);
+  }
+
+  /**
+   * Recompile terrain + water programs for a new octave count in the
+   * background, then swap the define on the live materials — at that point
+   * the programs are already in three's cache, so the swap is instant.
+   */
+  async _setOctavesAsync(oct) {
+    const token = ++this._octToken;
+    this.cb.onStatus('Compiling shaders…', true);
+
+    const warm = [
+      createTerrainMaterial(this.uniforms, oct),
+      createWaterMaterial(this.uniforms, oct),
+    ];
+    if (this.worldMode === 'infinite') {
+      warm.push(createInfiniteTerrainMaterial(this.uniforms, oct));
+      warm.push(createInfiniteWaterMaterial(this.uniforms, oct));
+    }
+
+    try {
+      await this._compileMaterialVariants(warm);
+    } catch (e) {
+      console.warn('Octave shader compile failed', e);
+    }
+
+    if (token === this._octToken && !this._disposed) {
+      const live = [this.terrainMaterial, this.waterMaterial,
+        this._infiniteTerrainMat, this._infiniteWaterMat];
+      for (const m of live) {
+        if (m && m.defines.OCTAVES !== oct) {
+          m.defines.OCTAVES = oct;
+          m.needsUpdate = true;
+        }
+      }
+      if (!this._compiling) this.cb.onStatus('Ready', false);
+      this._minimapDirtyAt = performance.now();
+      this.minimap.requestRedraw();
+    }
+
+    // keep warm materials alive until the live ones acquire the cached
+    // programs on a rendered frame — disposing now would delete the programs
+    this._matTrash.push({ mats: warm, at: performance.now() + 2000 });
   }
 
   // ------------------------------------------------------------------ camera
@@ -562,9 +665,40 @@ export class Engine {
     this._applyPixelRatio();
     this._applyWaterPerf();
 
+    // Compile the INFINITE_MODE shader variants in the background before the
+    // first infinite frame renders (avoids a multi-second freeze on entry).
+    this._warmupInfiniteShaders(oct);
+
     this.cb.onStatus('Infinite World', false);
     if (this.cb.onQualityChange) this.cb.onQualityChange(this.qualityPreset);
     if (this.cb.onTimeOfDayChange) this.cb.onTimeOfDayChange(this.timeOfDay);
+  }
+
+  async _warmupInfiniteShaders(oct) {
+    this._compiling++;
+    this.cb.onStatus('Compiling world shaders…', true);
+    // warm clones (not the live materials) so mode exits mid-compile are safe
+    const warm = [
+      createInfiniteTerrainMaterial(this.uniforms, oct),
+      createInfiniteWaterMaterial(this.uniforms, oct),
+    ];
+    try {
+      await this._compileMaterialVariants(warm);
+      // sky dome material (already in the scene) — both output variants
+      await this.renderer.compileAsync(this.scene, this.camera);
+      this.underwater._ensureTarget(this.renderer);
+      this.renderer.setRenderTarget(this.underwater._rt);
+      const pending = this.renderer.compileAsync(this.scene, this.camera);
+      this.renderer.setRenderTarget(null);
+      await pending;
+    } catch (e) {
+      console.warn('Infinite shader warmup failed', e);
+    }
+    this._matTrash.push({ mats: warm, at: performance.now() + 2000 });
+    this._compiling--;
+    if (!this._disposed && !this._compiling) {
+      this.cb.onStatus(this.worldMode === 'infinite' ? 'Infinite World' : 'Ready', false);
+    }
   }
 
   _exitInfiniteMode() {
@@ -651,8 +785,8 @@ export class Engine {
   setPerfSetting(key, value) {
     if (!(key in this.perf)) return;
     const next = { ...this.perf, [key]: value };
-    // autoPerf toggle alone doesn't make the preset custom
-    if (key !== 'autoPerf') next.preset = 'custom';
+    // autoPerf / underwater toggles alone don't make the preset custom
+    if (key !== 'autoPerf' && key !== 'underwaterEffect') next.preset = 'custom';
     this.perf = sanitizePerfSettings(next);
     if (key === 'autoPerf' && !this.perf.autoPerf) {
       this._autoScale = 1.0;   // leaving auto mode restores full render scale
@@ -690,6 +824,7 @@ export class Engine {
 
     this._applyPixelRatio();
     this._applyWaterPerf();
+    this.underwater.enabled = s.underwaterEffect !== false;
 
     // Studio board: segment counts + master distance scale
     this.board.setLodSegments(segments);
@@ -843,7 +978,7 @@ export class Engine {
   }
 
   exportScreenshot() {
-    this.renderer.render(this.scene, this.camera);
+    this.underwater.render(this.renderer, this.scene, this.camera);
     this.renderer.domElement.toBlob((blob) => {
       if (!blob) return this.cb.onToast('Export failed');
       this._download(URL.createObjectURL(blob), `terrain-${this.params.seed}.png`);
@@ -931,6 +1066,26 @@ export class Engine {
     const now = performance.now();
     this.uniforms.uTime.value += dt;
 
+    // free warm-up materials once the live materials hold their programs
+    while (this._matTrash.length && now > this._matTrash[0].at) {
+      for (const m of this._matTrash.shift().mats) m.dispose();
+    }
+
+    // shaders still compiling in the background: keep input responsive but
+    // don't render — that would force a blocking program link
+    if (this._compiling) {
+      if (this.fpsControls) this.fpsControls.update(dt);
+      else this.controls.update(dt);
+      return;
+    }
+
+    // underwater activation is smoothed inside the effect (no flicker at the
+    // surface); inactive when there is no water — works in both modes.
+    const waterLevel = this.params.seaLevel > 0.5 ? this.params.seaLevel : null;
+    this.underwater.update(
+      dt, this.uniforms.uTime.value, this.camera.position.y, waterLevel, this.uniforms
+    );
+
     if (this.worldMode === 'infinite') {
       this._tickInfinite(dt, now);
     } else {
@@ -950,7 +1105,7 @@ export class Engine {
       this.cb.onLod([...this.board.lodCounts], this.params.chunkCount);
     }
 
-    this.renderer.render(this.scene, this.camera);
+    this.underwater.render(this.renderer, this.scene, this.camera);
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
 
@@ -985,7 +1140,7 @@ export class Engine {
       this.infiniteWorld.update(this.camera.position, this.camera);
     }
 
-    this.renderer.render(this.scene, this.camera);
+    this.underwater.render(this.renderer, this.scene, this.camera);
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
 
@@ -1028,6 +1183,10 @@ export class Engine {
     if (this.worldMode === 'infinite') this._exitInfiniteMode();
     this.board.dispose();
     this.minimap.dispose();
+    this.underwater.dispose();
+    for (const t of this._matTrash) for (const m of t.mats) m.dispose();
+    this._matTrash = [];
+    this._warmGeo.dispose();
     this.terrainMaterial.dispose();
     this.waterMaterial.dispose();
     this.renderer.dispose();

@@ -322,6 +322,10 @@ function renderSettings({
         <PerfSlider perf={perf} id="waterWaves" onPerfSetting={onPerfSetting} />
       </SettingGroup>
 
+      <SettingGroup tab="water" label="Underwater Effect" keywords="underwater submerged camera dive fog tint" {...groupProps}>
+        <ToggleRow label="Underwater Effect" value={perf.underwaterEffect !== false} onChange={(v) => onPerfSetting('underwaterEffect', v)} />
+      </SettingGroup>
+
       <SettingGroup tab="water" label="Water Distance" keywords="extent range fade" {...groupProps}>
         <PerfSlider perf={perf} id="waterDistance" onPerfSetting={onPerfSetting} />
       </SettingGroup>

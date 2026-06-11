@@ -13,7 +13,7 @@ export default function PerformancePanel({ stats, gpu }) {
     <ControlSection
       id="inspector-performance"
       title="PERFORMANCE"
-      defaultOpen
+      defaultOpen={false}
       icon={(
         <svg viewBox="0 0 16 16" fill="none">
           <path d="M2 12h12M4 9l2-4 2 3 3-5 3 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />

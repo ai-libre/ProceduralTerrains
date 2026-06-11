@@ -6,7 +6,7 @@ export default function WorldPanel({ params, onParam }) {
     <ControlSection
       id="inspector-world"
       title="WORLD"
-      defaultOpen={false}
+      defaultOpen={true}
       icon={(
         <svg viewBox="0 0 16 16" fill="none">
           <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.1" />

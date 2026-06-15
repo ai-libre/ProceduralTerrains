@@ -192,3 +192,123 @@ export function createPlanetMaterial(uniforms, octaves = 7) {
     side: THREE.DoubleSide,
   });
 }
+
+// ============================================================================
+// Planet water: a sphere shell at radius (planetRadius + seaLevel). The
+// fragment samples heightAt3D under each point and discards where the terrain
+// pokes above the sea, so oceans only fill the basins. Shares the same height
+// field + palette as the terrain, so coastlines line up exactly.
+// ============================================================================
+
+const WATER_VERTEX = /* glsl */ `
+varying vec3 vDir;
+varying vec3 vWorldPos;
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorldPos = wp.xyz;
+  vDir = normalize(wp.xyz);
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+
+const WATER_FRAGMENT = /* glsl */ `
+precision highp float;
+
+${COMMON_UNIFORMS_GLSL}
+${PLANET_UNIFORMS_GLSL}
+${NOISE_GLSL}
+${BIOME_GLSL}
+${PLANET_NOISE_GLSL}
+${PLANET_HEIGHT_GLSL}
+${PALETTE_UNIFORMS_GLSL}
+
+uniform float uWaterAnim;
+uniform float uWaterQuality;
+uniform float uWaterDetail;
+uniform float uWaterReflection;
+uniform float uWaveComplexity;
+
+varying vec3 vDir;
+varying vec3 vWorldPos;
+
+float rippleAt(vec2 p, float t) {
+  float h = vnoise(p + vec2(t * 0.6, t * 0.45));
+  if (uWaterQuality > 0.5) {
+    h += 0.5 * uWaterDetail * vnoise(p * 2.7 - vec2(t * 0.8, t * 0.3));
+  }
+  return h;
+}
+
+void main() {
+  vec3 dir = normalize(vDir);
+
+  // ocean only where the terrain sits below sea level
+  float terrainR = uPlanetRadius + heightAt3D(dir);
+  float waterR = uPlanetRadius + uSeaLevel;
+  float depth = waterR - terrainR;
+  if (depth <= 0.02) discard;
+
+  // tangent frame around the local up (= dir)
+  vec3 up = dir;
+  vec3 ref = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+  vec3 t1 = normalize(cross(ref, up));
+  vec3 t2 = cross(up, t1);
+
+  // a stable 2D coordinate for the ripple noise
+  vec2 rp = (vWorldPos.xz + vWorldPos.y * vec2(0.31, -0.19)) * 0.055;
+  float t = uTime * uWaterAnim;
+  float e = 1.6 * 0.055;
+  float r0 = rippleAt(rp, t);
+  float rX = rippleAt(rp + vec2(e, 0.0), t);
+  float rZ = rippleAt(rp + vec2(0.0, e), t);
+  float nStr = 0.03 * uWaveComplexity;
+  vec3 n = normalize(up - t1 * ((rX - r0) * nStr * 30.0) - t2 * ((rZ - r0) * nStr * 30.0));
+
+  float dGrade = clamp(depth / 55.0, 0.0, 1.0);
+  vec3 col = mix(uColShallow, uColDeep, dGrade);
+  col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, uPaletteSaturation);
+  col *= uPaletteTint;
+
+  vec3 viewDir = normalize(cameraPosition - vWorldPos);
+  float diff = max(dot(n, uSunDir), 0.0);
+  col *= 0.55 + 0.65 * diff;
+  float spec = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 90.0);
+  col += vec3(1.0, 0.95, 0.85) * spec * 0.55 * uWaterReflection;
+
+  // spherical fresnel: up is the local normal, not world +Y
+  float fres = pow(1.0 - max(dot(viewDir, up), 0.0), 3.0);
+  col += vec3(0.30, 0.42, 0.55) * fres * 0.25 * uWaterReflection;
+
+  float foamNoise = 0.0;
+  if (uWaterQuality > 0.5) {
+    foamNoise = vnoise(vWorldPos.xz * 0.22 + vec2(t * 1.4, -t * 1.1));
+  }
+  float foam = smoothstep(3.2, 0.6, depth + foamNoise * 2.4);
+  col = mix(col, uColFoam, foam * 0.75);
+
+  float alpha = clamp(0.50 + dGrade * 0.42 + fres * 0.15 + foam * 0.3, 0.0, 0.94);
+
+  col = pow(col, vec3(1.0 / 2.2));
+  gl_FragColor = vec4(col, alpha);
+}
+`;
+
+export function createPlanetWaterMaterial(uniforms, octaves = 7) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      ...uniforms,
+      // water knobs are private (never shared with terrain)
+      uWaterAnim:       { value: 1.0 },
+      uWaterQuality:    { value: 2.0 },
+      uWaterDetail:     { value: 1.0 },
+      uWaterReflection: { value: 1.0 },
+      uWaveComplexity:  { value: 1.0 },
+    },
+    defines: { OCTAVES: octaves, PLANET_MODE: 1 },
+    vertexShader: WATER_VERTEX,
+    fragmentShader: WATER_FRAGMENT,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+}

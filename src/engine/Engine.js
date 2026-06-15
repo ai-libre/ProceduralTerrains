@@ -4,7 +4,7 @@ import { createWaterMaterial, createInfiniteWaterMaterial } from './terrain/Wate
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
 import { PlanetWorld } from './terrain/PlanetWorld.js';
-import { createPlanetMaterial } from './terrain/PlanetMaterial.js';
+import { createPlanetMaterial, createPlanetWaterMaterial } from './terrain/PlanetMaterial.js';
 import { PlanetHeightSampler } from './terrain/PlanetHeightSampler.js';
 import { PlanetOrbitControls } from './PlanetOrbitControls.js';
 import { PlanetController } from './player/PlanetController.js';
@@ -21,6 +21,7 @@ import {
   sanitizePerfSettings, resolveLodSegments, resolveLodDistances,
 } from './render/PerformanceSettings.js';
 import { TerrainExporter } from './terrain/TerrainExporter.js';
+import { PlanetExporter } from './terrain/PlanetExporter.js';
 import { buildBoardPlinthGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
 import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
@@ -102,8 +103,12 @@ export class Engine {
     // Planet mode systems
     this.planetWorld = null;
     this.planetMaterial = null;
+    this.planetWater = null;          // sphere water shell mesh
+    this.planetWaterMat = null;
     this.planetControls = null;
+    this.planetSampler = null;
     this.planetFaceGrid = 8;
+    this._compiledKeys = new Set();   // mode:octave shader sets already compiled
 
     // First-person player physics (optional, both modes)
     this.player = null;
@@ -514,6 +519,8 @@ export class Engine {
 
     this.terrainMaterial.wireframe = p.wireframe;
     if (this.planetWorld) this.planetWorld.setWireframe(p.wireframe);
+    if (this.planetWaterMat) this.planetWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
+    this._updatePlanetWater();
     this.waterMaterial.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
     this.water.position.y = p.seaLevel;
     this.water.visible = p.seaLevel > 0.5;
@@ -541,13 +548,21 @@ export class Engine {
   // variants: the canvas one and the render-target one (different program
   // cache key — linear output color space) used by the underwater pass.
 
-  /** Compile materials for both output variants without blocking. */
-  async _compileMaterialVariants(mats) {
+  /**
+   * Compile materials without blocking. By default compiles BOTH output
+   * variants (canvas + underwater render-target), since each has a distinct
+   * program cache key (output color space). Pass { canvasOnly: true } for
+   * modes that never use the underwater pass (planet) to skip the second,
+   * unused program — roughly halving the compile work.
+   */
+  async _compileMaterialVariants(mats, { canvasOnly = false } = {}) {
     const group = new THREE.Group();
     for (const m of mats) group.add(new THREE.Mesh(this._warmGeo, m));
 
     // canvas variant (targetScene = real scene so light counts match)
     await this.renderer.compileAsync(group, this.camera, this.scene);
+
+    if (canvasOnly) return;
 
     // render-target variant (used when the underwater pass is active)
     this.underwater._ensureTarget(this.renderer);
@@ -598,12 +613,15 @@ export class Engine {
       warm.push(createInfiniteTerrainMaterial(this.uniforms, oct));
       warm.push(createInfiniteWaterMaterial(this.uniforms, oct));
     }
-    if (this.worldMode === 'planet') {
+    const planetMode = this.worldMode === 'planet';
+    if (planetMode) {
       warm.push(createPlanetMaterial(this.uniforms, oct));
+      warm.push(createPlanetWaterMaterial(this.uniforms, oct));
     }
 
     try {
-      await this._compileMaterialVariants(warm);
+      // planet never uses the underwater RT variant — compile canvas-only there
+      await this._compileMaterialVariants(warm, { canvasOnly: planetMode });
     } catch (e) {
       console.warn('Octave shader compile failed', e);
     }
@@ -619,6 +637,10 @@ export class Engine {
       }
       // planet chunk materials share one program — swap the define on all
       if (this.planetWorld) this.planetWorld.setOctaves(oct);
+      if (this.planetWaterMat && this.planetWaterMat.defines.OCTAVES !== oct) {
+        this.planetWaterMat.defines.OCTAVES = oct;
+        this.planetWaterMat.needsUpdate = true;
+      }
       if (!this._compiling) this.cb.onStatus('Ready', false);
       this._minimapDirtyAt = performance.now();
       this.minimap.requestRedraw();
@@ -981,6 +1003,17 @@ export class Engine {
     this.planetWorld.setTriangleBudget(this.perf.triangleBudget);
     this.planetWorld.cullingAggressiveness = this.perf.cullingAggressiveness;
 
+    // water shell: a sphere at radius (planetRadius + seaLevel); the shader
+    // discards over land so only basins fill. One mesh, one shared material.
+    this.planetWaterMat = createPlanetWaterMaterial(this.uniforms, oct);
+    this.planetWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
+    this.planetWater = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), this.planetWaterMat);
+    this.planetWater.frustumCulled = false;
+    this.planetWater.renderOrder = 10;
+    this._updatePlanetWater();
+    this.scene.add(this.planetWater);
+    this._applyWaterPerf();
+
     // open-space backdrop (procedural sky is added in a later pass)
     this.scene.background = new THREE.Color(0x05070d);
 
@@ -1002,12 +1035,33 @@ export class Engine {
     this.cb.onStatus('Planet', false);
   }
 
+  /** Size + show/hide the water shell from the current radius + sea level. */
+  _updatePlanetWater() {
+    if (!this.planetWater) return;
+    const r = this.params.planetRadius + this.params.seaLevel;
+    this.planetWater.scale.setScalar(r);
+    this.planetWater.visible = this.params.seaLevel > 0.5;
+  }
+
   async _warmupPlanetShaders(oct) {
+    const key = `planet:${oct}`;
+    if (this._compiledKeys.has(key)) {
+      // programs already compiled this session — three's cache makes the live
+      // materials link instantly, so skip the redundant background compile
+      if (!this._compiling) this.cb.onStatus('Planet', false);
+      return;
+    }
     this._compiling++;
     this.cb.onStatus('Compiling planet shaders…', true);
-    const warm = [createPlanetMaterial(this.uniforms, oct)];
+    // planet never uses the underwater pass → compile only the canvas variant
+    // (skips the second, render-target colour-space program: ~half the work)
+    const warm = [
+      createPlanetMaterial(this.uniforms, oct),
+      createPlanetWaterMaterial(this.uniforms, oct),
+    ];
     try {
-      await this._compileMaterialVariants(warm);
+      await this._compileMaterialVariants(warm, { canvasOnly: true });
+      this._compiledKeys.add(key);
     } catch (e) {
       console.warn('Planet shader warmup failed', e);
     }
@@ -1022,6 +1076,12 @@ export class Engine {
   _disposePlanet() {
     if (this.player) { this.player.dispose(); this.player = null; }
     if (this.planetWorld) { this.planetWorld.dispose(); this.planetWorld = null; }
+    if (this.planetWater) {
+      this.scene.remove(this.planetWater);
+      this.planetWater.geometry.dispose();
+      this.planetWater = null;
+    }
+    if (this.planetWaterMat) { this.planetWaterMat.dispose(); this.planetWaterMat = null; }
     if (this.planetControls) { this.planetControls.dispose(); this.planetControls = null; }
     if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
     if (this.proceduralSky) { this.proceduralSky.dispose(); this.proceduralSky = null; }
@@ -1115,6 +1175,12 @@ export class Engine {
       this.infiniteWorld.cullingAggressiveness = s.cullingAggressiveness;
     }
 
+    if (this.planetWorld) {
+      this.planetWorld.setLodSegments(segments);
+      this.planetWorld.setTriangleBudget(s.triangleBudget);
+      this.planetWorld.cullingAggressiveness = s.cullingAggressiveness;
+    }
+
     if (this.fogManager) {
       this.fogManager.setDistanceMultiplier(s.fogDistance);
       this.fogManager.updateFromViewDistance(s.viewRadius, this.params.chunkSize);
@@ -1125,7 +1191,7 @@ export class Engine {
   /** Water quality uniforms — per water material, never shared with terrain. */
   _applyWaterPerf() {
     const s = this.perf;
-    for (const mat of [this.waterMaterial, this._infiniteWaterMat]) {
+    for (const mat of [this.waterMaterial, this._infiniteWaterMat, this.planetWaterMat]) {
       if (!mat) continue;
       mat.uniforms.uWaterQuality.value = s.waterQuality;
       mat.uniforms.uWaterDetail.value = s.waterDetail;
@@ -1266,7 +1332,9 @@ export class Engine {
   }
 
   exportScreenshot() {
-    this.underwater.render(this.renderer, this.scene, this.camera);
+    // planet renders straight to the canvas (no underwater pass)
+    if (this.worldMode === 'planet') this.renderer.render(this.scene, this.camera);
+    else this.underwater.render(this.renderer, this.scene, this.camera);
     this.renderer.domElement.toBlob((blob) => {
       if (!blob) return this.cb.onToast('Export failed');
       this._download(URL.createObjectURL(blob), `terrain-${this.params.seed}.png`);
@@ -1318,18 +1386,16 @@ export class Engine {
 
   async export3DTerrain(options) {
     this.cb.onStatus('Preparing export...', true);
+    const onMsg = (msg) => { this.cb.onStatus(msg, true); this.cb.onToast(msg); };
     try {
-      await TerrainExporter.export(
-        this.renderer,
-        this.params,
-        this.uniforms,
-        this.boardSize,
-        options,
-        (msg) => {
-          this.cb.onStatus(msg, true);
-          this.cb.onToast(msg);
-        }
-      );
+      if (this.worldMode === 'planet') {
+        // export the full cube-sphere planet mesh
+        await PlanetExporter.export(this.renderer, this.params, this.uniforms, options, onMsg);
+      } else {
+        await TerrainExporter.export(
+          this.renderer, this.params, this.uniforms, this.boardSize, options, onMsg
+        );
+      }
     } catch (e) {
       console.error(e);
       this.cb.onToast('Export failed: ' + e.message);
@@ -1376,8 +1442,11 @@ export class Engine {
     }
 
     // underwater activation is smoothed inside the effect (no flicker at the
-    // surface); inactive when there is no water — works in both modes.
-    const waterLevel = this.params.seaLevel > 0.5 ? this.params.seaLevel : null;
+    // surface); inactive when there is no water — works in studio + infinite.
+    // Planet has its own ocean shell and a curved "up", so the screen-space
+    // underwater pass does not apply there (waterLevel stays null → inactive).
+    const waterLevel = (this.worldMode !== 'planet' && this.params.seaLevel > 0.5)
+      ? this.params.seaLevel : null;
     this.underwater.update(
       dt, this.uniforms.uTime.value, this.camera.position.y, waterLevel, this.uniforms
     );
@@ -1504,7 +1573,8 @@ export class Engine {
 
     if (this.planetWorld) this.planetWorld.update(this.camera.position, this.camera);
 
-    this.underwater.render(this.renderer, this.scene, this.camera);
+    // planet renders straight to the canvas — no underwater render-target pass
+    this.renderer.render(this.scene, this.camera);
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
     if (this.planetWorld) this.planetWorld.notifyTriangles(triangles);

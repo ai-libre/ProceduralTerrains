@@ -309,6 +309,11 @@ export function createPlanetWaterMaterial(uniforms, octaves = 7) {
     fragmentShader: WATER_FRAGMENT,
     transparent: true,
     depthWrite: false,
+    // bias the depth test toward the camera so the transparent shell wins over
+    // coincident terrain at the shoreline (belt-and-braces with the radius bias)
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
     side: THREE.DoubleSide,
   });
 }

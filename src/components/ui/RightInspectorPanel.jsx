@@ -7,6 +7,7 @@ import WorldPanel from './WorldPanel.jsx';
 
 export default function RightInspectorPanel({
   params,
+  worldMode,
   camInfo,
   camMode,
   onMode,
@@ -81,7 +82,7 @@ export default function RightInspectorPanel({
           onParam={onParam}
           onTuning={onStyleTuning}
         />
-        <WorldPanel params={params} onParam={onParam} />
+        <WorldPanel params={params} worldMode={worldMode} onParam={onParam} />
         <CameraPanel
           camInfo={camInfo}
           camMode={camMode}

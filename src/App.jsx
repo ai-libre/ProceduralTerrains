@@ -170,14 +170,19 @@ export default function App() {
   const handlePerfPreset = (key) => engine().setPerfPreset(key);
   const handlePerfSetting = (key, value) => engine().setPerfSetting(key, value);
 
+  const isStudio = worldMode === 'studio';
   const isInfinite = worldMode === 'infinite';
   const isPlanet = worldMode === 'planet';
-  const isExplore = isInfinite || isPlanet;   // full-screen FPS-style modes
   const paintMode = !!paintState?.enabled;
-  const showStudioUI = !previewMode && !isExplore && !paintMode;
+  // Planet orbit behaves like Studio (full editor panels + orbit camera);
+  // walking the planet — or Infinite mode — uses the minimal FPS overlay.
+  const planetWalking = isPlanet && playerMode;
+  const fpsView = isInfinite || planetWalking;
+  const studioLike = isStudio || (isPlanet && !playerMode);
+  const showStudioUI = !previewMode && !paintMode && studioLike;
 
   return (
-    <div id="app" className={`${previewMode ? 'preview-mode' : ''} ${isExplore ? 'infinite-mode' : ''}`}>
+    <div id="app" className={`${previewMode ? 'preview-mode' : ''} ${fpsView ? 'infinite-mode' : ''}`}>
       <TopBar
         previewMode={previewMode}
         worldMode={worldMode}
@@ -205,6 +210,7 @@ export default function App() {
         {showStudioUI && (
           <LeftControlPanel
             params={params}
+            worldMode={worldMode}
             onParam={onParam}
             onPreset={(key) => engine().applyPresetByKey(key)}
             onRandomizeSeed={() => engine().randomizeSeed()}
@@ -218,13 +224,13 @@ export default function App() {
         <div className="viewport-area">
           <canvas id="viewport" ref={canvasRef} />
 
-          <div id="help-card" className={helpVisible && !isExplore ? '' : 'hidden'}>
+          <div id="help-card" className={helpVisible && studioLike ? '' : 'hidden'}>
             <div className="help-row"><span className="help-ic">🖐</span> Drag to pan</div>
             <div className="help-row"><span className="help-ic">🖱</span> Scroll to zoom</div>
             <div className="help-row"><span className="help-ic">↻</span> Right-click + drag to orbit</div>
           </div>
 
-          {showStudioUI && (
+          {showStudioUI && isStudio && (
             <MinimapOverlay
               boardSize={boardSize}
               baseRef={minimapBaseRef}
@@ -252,7 +258,7 @@ export default function App() {
             />
           )}
 
-          {isExplore && (
+          {fpsView && (
             <InfiniteHUD
               stats={infiniteStats}
               isPlanet={isPlanet}
@@ -276,6 +282,7 @@ export default function App() {
         {showStudioUI && (
           <RightInspectorPanel
             params={params}
+            worldMode={worldMode}
             camInfo={camInfo}
             camMode={camMode}
             onMode={(mode) => { engine().setCameraMode(mode); setCamMode(mode); }}
@@ -306,9 +313,9 @@ export default function App() {
         stats={stats}
         worldMode={worldMode}
         infiniteStats={infiniteStats}
-        qualityPreset={isExplore ? qualityPreset : null}
+        qualityPreset={fpsView ? qualityPreset : null}
         playerMode={playerMode}
-        playerState={isExplore ? infiniteStats?.playerState : playerState}
+        playerState={fpsView ? infiniteStats?.playerState : playerState}
       />
 
       <SettingsModal

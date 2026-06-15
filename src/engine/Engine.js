@@ -239,6 +239,13 @@ export class Engine {
     this.params[key] = value;
     this.cb.onParams({ ...this.params });
 
+    // planet geometry params: rebuild the cube-sphere (chunk layout / radius)
+    if (key === 'planetRadius' || key === 'planetFaceGrid') {
+      this._applyUniforms();        // live uniforms (radius, eps)
+      if (this.worldMode === 'planet') this._rebuildPlanet();
+      return;
+    }
+
     if (SHAPE_KEYS.has(key) && !this.params.autoUpdate) {
       this.cb.onStatus('Pending changes — press Regenerate', true);
       return;
@@ -491,7 +498,7 @@ export class Engine {
     u.uSkirtDepth.value = this._skirtDepth();
     u.uPlanetRadius.value = p.planetRadius;
     // angular epsilon for analytic planet normals ≈ one finest-LOD quad
-    u.uPlanetEps.value = 2.0 / (this.planetFaceGrid * 64);
+    u.uPlanetEps.value = 2.0 / (this._planetFaceGrid() * 64);
 
     // In infinite mode, fog and sun are managed by FogManager + TimeOfDay.
     // Only apply studio fog settings when NOT in infinite mode.
@@ -970,6 +977,53 @@ export class Engine {
 
   // ---------------------------------------------------------------- planet mode
 
+  /** Planet base radius + chunks-per-face from params (sane fallbacks). */
+  _planetRadius() { return this.params.planetRadius || 16000; }
+  _planetFaceGrid() { return Math.round(this.params.planetFaceGrid) || 8; }
+
+  /** (Re)build the cube-sphere world + water shell from the current params.
+   *  Disposes any existing planet world/water first. */
+  _buildPlanetWorld() {
+    if (this.planetWorld) { this.planetWorld.dispose(); this.planetWorld = null; }
+    if (this.planetWater) {
+      this.scene.remove(this.planetWater);
+      this.planetWater.geometry.dispose();
+      this.planetWater = null;
+    }
+    if (this.planetWaterMat) { this.planetWaterMat.dispose(); this.planetWaterMat = null; }
+
+    const p = this.params;
+    const oct = Math.round(p.octaves);
+    // each chunk gets its own material instance that shares the engine's
+    // uniform objects (so style/palette tweaks propagate) but owns its
+    // per-chunk cube-face mapping uniforms
+    this.planetWorld = new PlanetWorld(
+      this.scene,
+      () => createPlanetMaterial(this.uniforms, oct),
+      {
+        radius: this._planetRadius(),
+        maxHeight: this._maxHeight(),
+        skirtDepth: this._skirtDepth() * 3,
+        faceGrid: this._planetFaceGrid(),
+        lodSegments: resolveLodSegments(this.perf),
+      }
+    );
+    this.planetWorld.setWireframe(p.wireframe);
+    this.planetWorld.setTriangleBudget(this.perf.triangleBudget);
+    this.planetWorld.cullingAggressiveness = this.perf.cullingAggressiveness;
+
+    // water shell: a sphere at radius (planetRadius + seaLevel); the shader
+    // discards over land so only basins fill. One mesh, one shared material.
+    this.planetWaterMat = createPlanetWaterMaterial(this.uniforms, oct);
+    this.planetWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
+    this.planetWater = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 96), this.planetWaterMat);
+    this.planetWater.frustumCulled = false;
+    this.planetWater.renderOrder = 10;
+    this._updatePlanetWater();
+    this.scene.add(this.planetWater);
+    this._applyWaterPerf();
+  }
+
   _enterPlanetMode() {
     const p = this.params;
     // planet is fully procedural — Studio paint layers don't apply
@@ -984,62 +1038,61 @@ export class Engine {
     // refresh shared uniforms (radius, frequency, sun, fog-off for planet)
     this._applyUniforms();
 
-    const oct = Math.round(p.octaves);
-    // each chunk gets its own material instance that shares the engine's
-    // uniform objects (so style/palette tweaks propagate) but owns its
-    // per-chunk cube-face mapping uniforms
-    this.planetWorld = new PlanetWorld(
-      this.scene,
-      () => createPlanetMaterial(this.uniforms, oct),
-      {
-        radius: p.planetRadius,
-        maxHeight: this._maxHeight(),
-        skirtDepth: this._skirtDepth() * 3,
-        faceGrid: this.planetFaceGrid,
-        lodSegments: resolveLodSegments(this.perf),
-      }
-    );
-    this.planetWorld.setWireframe(p.wireframe);
-    this.planetWorld.setTriangleBudget(this.perf.triangleBudget);
-    this.planetWorld.cullingAggressiveness = this.perf.cullingAggressiveness;
-
-    // water shell: a sphere at radius (planetRadius + seaLevel); the shader
-    // discards over land so only basins fill. One mesh, one shared material.
-    this.planetWaterMat = createPlanetWaterMaterial(this.uniforms, oct);
-    this.planetWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
-    this.planetWater = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), this.planetWaterMat);
-    this.planetWater.frustumCulled = false;
-    this.planetWater.renderOrder = 10;
-    this._updatePlanetWater();
-    this.scene.add(this.planetWater);
-    this._applyWaterPerf();
+    this._buildPlanetWorld();
 
     // open-space backdrop (procedural sky is added in a later pass)
     this.scene.background = new THREE.Color(0x05070d);
 
-    // camera for planet scale
-    this.camera.fov = 60;
-    this.camera.near = Math.max(0.5, p.planetRadius * 0.00004);
-    this.camera.far = p.planetRadius * 12;
-    this.camera.updateProjectionMatrix();
+    this._applyPlanetCamera();
 
-    this.planetControls = new PlanetOrbitControls(this.camera, this.canvas, p.planetRadius);
+    this.planetControls = new PlanetOrbitControls(this.camera, this.canvas, this._planetRadius());
     this.planetControls.onFirstInteract = () => this.cb.onFirstInteract();
     this.planetControls.update(0.001);   // place the camera immediately
 
     this._applyPixelRatio();
 
     // compile the PLANET_MODE shader variant in the background (no freeze)
-    this._warmupPlanetShaders(oct);
+    this._warmupPlanetShaders(Math.round(p.octaves));
 
     this.cb.onStatus('Planet', false);
+  }
+
+  /** Camera near/far tuned to the planet scale. */
+  _applyPlanetCamera() {
+    const r = this._planetRadius();
+    this.camera.fov = 60;
+    this.camera.near = Math.max(0.5, r * 0.00004);
+    this.camera.far = r * 12;
+    this.camera.updateProjectionMatrix();
+  }
+
+  /** Rebuild the planet for a radius / face-grid change (settings panel). */
+  _rebuildPlanet() {
+    if (this.worldMode !== 'planet') return;
+    this._buildPlanetWorld();
+    this._applyPlanetCamera();
+    // re-clamp the orbit distance to the new radius without snapping the view
+    const c = this.planetControls;
+    if (c) {
+      const r = this._planetRadius();
+      c.planetRadius = r;
+      c.minDist = r * 1.02;
+      c.maxDist = r * 6.0;
+      c.goalDist = Math.min(Math.max(c.goalDist, c.minDist), c.maxDist);
+    }
   }
 
   /** Size + show/hide the water shell from the current radius + sea level. */
   _updatePlanetWater() {
     if (!this.planetWater) return;
-    const r = this.params.planetRadius + this.params.seaLevel;
-    this.planetWater.scale.setScalar(r);
+    const seaR = this._planetRadius() + this.params.seaLevel;
+    // The faceted water sphere chords sag below the ideal radius between
+    // vertices; push the mesh out past that sag so it never dips into the
+    // terrain at the shoreline and z-fights. The shader's analytic depth
+    // still uses the TRUE sea radius (uPlanetRadius + uSeaLevel), so the
+    // waterline position is unaffected by this bias.
+    const sag = seaR * (1 - Math.cos(Math.PI / 96));   // 96 = height segments
+    this.planetWater.scale.setScalar(seaR + sag * 1.5 + 4);
     this.planetWater.visible = this.params.seaLevel > 0.5;
   }
 
@@ -1572,6 +1625,17 @@ export class Engine {
     }
 
     if (this.planetWorld) this.planetWorld.update(this.camera.position, this.camera);
+
+    // feed the studio LOD inspector (throttled) — same callback as studio
+    if (this.planetWorld && now - this._lastLodUpdate > 150) {
+      this._lastLodUpdate = now;
+      this.cb.onLod(
+        [...this.planetWorld.lodCounts],
+        this._planetFaceGrid(),
+        this.planetWorld.visibleChunkCount,
+        this.planetWorld.culledChunkCount
+      );
+    }
 
     // planet renders straight to the canvas — no underwater render-target pass
     this.renderer.render(this.scene, this.camera);

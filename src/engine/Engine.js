@@ -3,6 +3,11 @@ import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMate
 import { createWaterMaterial, createInfiniteWaterMaterial } from './terrain/WaterMaterial.js';
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
+import { PlanetWorld } from './terrain/PlanetWorld.js';
+import { createPlanetMaterial } from './terrain/PlanetMaterial.js';
+import { PlanetHeightSampler } from './terrain/PlanetHeightSampler.js';
+import { PlanetOrbitControls } from './PlanetOrbitControls.js';
+import { PlanetController } from './player/PlanetController.js';
 import { EditorControls } from './EditorControls.js';
 import { FPSControls } from './FPSControls.js';
 import { Minimap } from './Minimap.js';
@@ -88,10 +93,17 @@ export class Engine {
     this.paintMode = null;
     this.paintState = null;
 
-    // World mode: 'studio' (single board) or 'infinite'
+    // World mode: 'studio' (single board), 'infinite' (streamed flat grid),
+    // or 'planet' (cube-sphere world)
     this.worldMode = 'studio';
     this.infiniteWorld = null;
     this.fpsControls = null;
+
+    // Planet mode systems
+    this.planetWorld = null;
+    this.planetMaterial = null;
+    this.planetControls = null;
+    this.planetFaceGrid = 8;
 
     // First-person player physics (optional, both modes)
     this.player = null;
@@ -472,6 +484,9 @@ export class Engine {
     u.uLodDebug.value = p.lodDebug ? 1 : 0;
     u.uEps.value = Math.max(0.35, size / 4096);
     u.uSkirtDepth.value = this._skirtDepth();
+    u.uPlanetRadius.value = p.planetRadius;
+    // angular epsilon for analytic planet normals ≈ one finest-LOD quad
+    u.uPlanetEps.value = 2.0 / (this.planetFaceGrid * 64);
 
     // In infinite mode, fog and sun are managed by FogManager + TimeOfDay.
     // Only apply studio fog settings when NOT in infinite mode.
@@ -483,7 +498,9 @@ export class Engine {
       ).normalize();
       this.sunLight.position.copy(u.uSunDir.value).multiplyScalar(2000);
 
-      u.uFogDensity.value = p.fogDensity * 0.0001;
+      // planet is viewed in open space — exp distance fog would swallow the
+      // whole globe, so it is disabled there.
+      u.uFogDensity.value = this.worldMode === 'planet' ? 0.0 : p.fogDensity * 0.0001;
       this._applyStudioSunFromStyle();
     }
 
@@ -496,6 +513,7 @@ export class Engine {
     }
 
     this.terrainMaterial.wireframe = p.wireframe;
+    if (this.planetWorld) this.planetWorld.setWireframe(p.wireframe);
     this.waterMaterial.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
     this.water.position.y = p.seaLevel;
     this.water.visible = p.seaLevel > 0.5;
@@ -580,6 +598,9 @@ export class Engine {
       warm.push(createInfiniteTerrainMaterial(this.uniforms, oct));
       warm.push(createInfiniteWaterMaterial(this.uniforms, oct));
     }
+    if (this.worldMode === 'planet') {
+      warm.push(createPlanetMaterial(this.uniforms, oct));
+    }
 
     try {
       await this._compileMaterialVariants(warm);
@@ -596,6 +617,8 @@ export class Engine {
           m.needsUpdate = true;
         }
       }
+      // planet chunk materials share one program — swap the define on all
+      if (this.planetWorld) this.planetWorld.setOctaves(oct);
       if (!this._compiling) this.cb.onStatus('Ready', false);
       this._minimapDirtyAt = performance.now();
       this.minimap.requestRedraw();
@@ -653,6 +676,13 @@ export class Engine {
     if (enabled === this.playerMode) return;
     this.playerMode = enabled;
 
+    // Planet mode uses a dedicated spherical-gravity walker.
+    if (this.worldMode === 'planet') {
+      this._setPlanetPlayerMode(enabled);
+      if (this.cb.onPlayerMode) this.cb.onPlayerMode(this.playerMode);
+      return;
+    }
+
     if (enabled) {
       if (this.worldMode === 'studio') {
         // Studio: editor controls sleep, an FPS look controller takes over
@@ -692,6 +722,36 @@ export class Engine {
     if (this.cb.onPlayerMode) this.cb.onPlayerMode(this.playerMode);
   }
 
+  _getPlanetSampler() {
+    if (!this.planetSampler) {
+      this.planetSampler = new PlanetHeightSampler(this.uniforms, () => ({
+        octaves: Math.round(this.params.octaves),
+      }));
+    }
+    return this.planetSampler;
+  }
+
+  /** Enter/leave the spherical-gravity walker (orbit camera ↔ surface walk). */
+  _setPlanetPlayerMode(enabled) {
+    if (enabled) {
+      // orbit camera sleeps while walking (frees the click for pointer lock)
+      if (this.planetControls) { this.planetControls.dispose(); this.planetControls = null; }
+      this.player = new PlanetController({
+        camera: this.camera,
+        domElement: this.canvas,
+        sampler: this._getPlanetSampler(),
+      });
+      this.cb.onToast('Planet walk — click to lock mouse · Space jump · Shift run');
+    } else {
+      if (this.player) { this.player.dispose(); this.player = null; }
+      // restore the orbit camera at a sensible distance
+      this.planetControls = new PlanetOrbitControls(this.camera, this.canvas, this.params.planetRadius);
+      this.planetControls.onFirstInteract = () => this.cb.onFirstInteract();
+      this.planetControls.update(0.001);
+      this.cb.onToast('Orbit camera');
+    }
+  }
+
   // -------------------------------------------------------------- paint mode
 
   setPaintMode(enabled) {
@@ -718,14 +778,18 @@ export class Engine {
     if (this.paintMode?.state.enabled) this.setPaintMode(false);
     // player physics is per-mode — always leave it cleanly before switching
     this.setPlayerMode(false);
+
+    // tear down the mode we are leaving
+    const prev = this.worldMode;
+    if (prev === 'infinite') this._disposeInfinite();
+    else if (prev === 'planet') this._disposePlanet();
+
     this.worldMode = mode;
     this._terrainGen++;   // uFrequency / falloff change with the mode
 
-    if (mode === 'infinite') {
-      this._enterInfiniteMode();
-    } else {
-      this._exitInfiniteMode();
-    }
+    if (mode === 'infinite') this._enterInfiniteMode();
+    else if (mode === 'planet') this._enterPlanetMode();
+    else this._enterStudioMode();
   }
 
   _enterInfiniteMode() {
@@ -835,29 +899,21 @@ export class Engine {
     }
   }
 
-  _exitInfiniteMode() {
-    // Dispose infinite world
+  /** Dispose the infinite-world systems (does not restore studio). */
+  _disposeInfinite() {
     if (this.infiniteWorld) {
       this.infiniteWorld.dispose();
       this.infiniteWorld = null;
     }
-
-    // Dispose FPS controls
     if (this.fpsControls) {
       this.fpsControls.dispose();
       this.fpsControls = null;
     }
-
-    // Dispose procedural sky
     if (this.proceduralSky) {
       this.proceduralSky.dispose();
       this.proceduralSky = null;
     }
-
-    // Clear fog manager
     this.fogManager = null;
-
-    // Dispose infinite materials
     if (this._infiniteTerrainMat) {
       this._infiniteTerrainMat.dispose();
       this._infiniteTerrainMat = null;
@@ -866,27 +922,110 @@ export class Engine {
       this._infiniteWaterMat.dispose();
       this._infiniteWaterMat = null;
     }
+  }
 
-    // Restore studio objects
+  /** Restore the single-board studio scene + editor camera. */
+  _enterStudioMode() {
     this.board.group.visible = true;
     this.plinth.visible = true;
     this.water.visible = this.params.seaLevel > 0.5;
 
-    // Restore uniforms
     this._applyUniforms();
     this.uniforms.uPaintEnabled.value = 1;
 
-    // Restore scene background
     this.scene.background = new THREE.Color(0x0b0e14);
+    this._applyStudioFogFromStyle();
 
-    // Reset camera
     this.camera.fov = 45;
     this.camera.near = 1;
     this.camera.far = 50000;
     this.camera.updateProjectionMatrix();
+    this.controls.enabled = true;
     this.controls.reset(this.boardSize);
 
     this.cb.onStatus('Ready', false);
+  }
+
+  // ---------------------------------------------------------------- planet mode
+
+  _enterPlanetMode() {
+    const p = this.params;
+    // planet is fully procedural — Studio paint layers don't apply
+    this.uniforms.uPaintEnabled.value = 0;
+
+    // hide studio objects + sleep the editor camera
+    this.board.group.visible = false;
+    this.plinth.visible = false;
+    this.water.visible = false;
+    this.controls.enabled = false;
+
+    // refresh shared uniforms (radius, frequency, sun, fog-off for planet)
+    this._applyUniforms();
+
+    const oct = Math.round(p.octaves);
+    // each chunk gets its own material instance that shares the engine's
+    // uniform objects (so style/palette tweaks propagate) but owns its
+    // per-chunk cube-face mapping uniforms
+    this.planetWorld = new PlanetWorld(
+      this.scene,
+      () => createPlanetMaterial(this.uniforms, oct),
+      {
+        radius: p.planetRadius,
+        maxHeight: this._maxHeight(),
+        skirtDepth: this._skirtDepth() * 3,
+        faceGrid: this.planetFaceGrid,
+        lodSegments: resolveLodSegments(this.perf),
+      }
+    );
+    this.planetWorld.setWireframe(p.wireframe);
+    this.planetWorld.setTriangleBudget(this.perf.triangleBudget);
+    this.planetWorld.cullingAggressiveness = this.perf.cullingAggressiveness;
+
+    // open-space backdrop (procedural sky is added in a later pass)
+    this.scene.background = new THREE.Color(0x05070d);
+
+    // camera for planet scale
+    this.camera.fov = 60;
+    this.camera.near = Math.max(0.5, p.planetRadius * 0.00004);
+    this.camera.far = p.planetRadius * 12;
+    this.camera.updateProjectionMatrix();
+
+    this.planetControls = new PlanetOrbitControls(this.camera, this.canvas, p.planetRadius);
+    this.planetControls.onFirstInteract = () => this.cb.onFirstInteract();
+    this.planetControls.update(0.001);   // place the camera immediately
+
+    this._applyPixelRatio();
+
+    // compile the PLANET_MODE shader variant in the background (no freeze)
+    this._warmupPlanetShaders(oct);
+
+    this.cb.onStatus('Planet', false);
+  }
+
+  async _warmupPlanetShaders(oct) {
+    this._compiling++;
+    this.cb.onStatus('Compiling planet shaders…', true);
+    const warm = [createPlanetMaterial(this.uniforms, oct)];
+    try {
+      await this._compileMaterialVariants(warm);
+    } catch (e) {
+      console.warn('Planet shader warmup failed', e);
+    }
+    this._matTrash.push({ mats: warm, at: performance.now() + 2000 });
+    this._compiling--;
+    if (!this._disposed && !this._compiling) {
+      this.cb.onStatus(this.worldMode === 'planet' ? 'Planet' : 'Ready', false);
+    }
+  }
+
+  /** Dispose the planet-mode systems (does not restore studio). */
+  _disposePlanet() {
+    if (this.player) { this.player.dispose(); this.player = null; }
+    if (this.planetWorld) { this.planetWorld.dispose(); this.planetWorld = null; }
+    if (this.planetControls) { this.planetControls.dispose(); this.planetControls = null; }
+    if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
+    if (this.proceduralSky) { this.proceduralSky.dispose(); this.proceduralSky = null; }
+    if (this.planetMaterial) { this.planetMaterial.dispose(); this.planetMaterial = null; }
   }
 
   // -------------------------------------------------------- infinite controls
@@ -1226,6 +1365,10 @@ export class Engine {
       if (this.fpsControls) {
         this.fpsControls.update(dt);
         if (this.player) this.player.update(dt);
+      } else if (this.worldMode === 'planet' && this.player) {
+        this.player.update(dt);
+      } else if (this.planetControls) {
+        this.planetControls.update(dt);
       } else {
         this.controls.update(dt);
       }
@@ -1243,6 +1386,8 @@ export class Engine {
 
     if (this.worldMode === 'infinite') {
       this._tickInfinite(dt, now);
+    } else if (this.worldMode === 'planet') {
+      this._tickPlanet(dt, now);
     } else {
       this._tickStudio(dt, now);
     }
@@ -1350,6 +1495,48 @@ export class Engine {
     }
   }
 
+  _tickPlanet(dt, now) {
+    if (this.playerMode && this.player) {
+      this.player.update(dt);   // PlanetController owns look + spherical physics
+    } else if (this.planetControls) {
+      this.planetControls.update(dt);
+    }
+
+    if (this.planetWorld) this.planetWorld.update(this.camera.position, this.camera);
+
+    this.underwater.render(this.renderer, this.scene, this.camera);
+    const triangles = this.renderer.info.render.triangles;
+    const drawCalls = this.renderer.info.render.calls;
+    if (this.planetWorld) this.planetWorld.notifyTriangles(triangles);
+
+    this._frames++;
+    if (now - this._fpsTime >= 1000) {
+      this._fps = this._frames;
+      this._frames = 0;
+      this._fpsTime = now;
+    }
+    if (now - this._lastHudUpdate > 160) {
+      this._lastHudUpdate = now;
+      const pos = this.camera.position;
+      if (this.cb.onInfiniteStats) {
+        this.cb.onInfiniteStats({
+          x: pos.x.toFixed(0),
+          y: pos.y.toFixed(0),
+          z: pos.z.toFixed(0),
+          speed: this.player
+            ? Math.hypot(this.player.vel.x, this.player.vel.y, this.player.vel.z).toFixed(1)
+            : '0',
+          playerState: this.player ? this.player.state : null,
+          chunks: this.planetWorld ? this.planetWorld.activeChunkCount : 0,
+          visibleChunks: this.planetWorld ? this.planetWorld.visibleChunkCount : 0,
+          culledChunks: this.planetWorld ? this.planetWorld.culledChunkCount : 0,
+          lodCounts: this.planetWorld ? [...this.planetWorld.lodCounts] : [0, 0, 0, 0],
+        });
+      }
+      this.cb.onStats({ fps: this._fps, triangles, drawCalls });
+    }
+  }
+
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
@@ -1358,7 +1545,8 @@ export class Engine {
     if (this.paintMode) { this.paintMode.dispose(); this.paintMode = null; }
     if (this.player) { this.player.dispose(); this.player = null; }
     if (this.heightSampler) { this.heightSampler.dispose(); this.heightSampler = null; }
-    if (this.worldMode === 'infinite') this._exitInfiniteMode();
+    if (this.worldMode === 'infinite') this._disposeInfinite();
+    else if (this.worldMode === 'planet') this._disposePlanet();
     else if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
     this.board.dispose();
     this.minimap.dispose();

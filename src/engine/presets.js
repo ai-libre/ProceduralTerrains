@@ -38,6 +38,9 @@ export const DEFAULT_PARAMS = {
   chunkCount: 16,
   chunkSize: 128,
 
+  // planet mode: base sphere radius in world units (terrain rises above it)
+  planetRadius: 16000,
+
   wireframe: false,
   lodDebug: false,
   autoUpdate: true,

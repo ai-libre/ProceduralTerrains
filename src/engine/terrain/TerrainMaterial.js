@@ -201,6 +201,8 @@ export function createTerrainUniforms() {
     uColorMode:      { value: 0.0 },
     uEps:            { value: 0.6 },
     uSkirtDepth:     { value: 40 },
+    uPlanetRadius:   { value: 8000 },
+    uPlanetEps:      { value: 0.0015 },
     uSunDir:         { value: new THREE.Vector3(0.5, 0.7, 0.3).normalize() },
     uFogColor:       { value: new THREE.Color(0x0b0e14) },
     uFogDensity:     { value: 0.000045 },

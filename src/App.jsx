@@ -128,13 +128,16 @@ export default function App() {
     onImportStyle: (json) => json && engine().importPlanetStyleJSON(json),
   };
 
-  const toggleWorldMode = () => {
-    const next = worldMode === 'studio' ? 'infinite' : 'studio';
+  const selectWorldMode = (next) => {
+    if (next === worldMode) return;
     engine().setWorldMode(next);
     setWorldMode(next);
     if (next === 'infinite') {
       setHelpVisible(false);
       showToast('Entered Infinite World — click to lock mouse');
+    } else if (next === 'planet') {
+      setHelpVisible(false);
+      showToast('Entered Planet mode — drag to orbit, scroll to zoom');
     } else {
       showToast('Returned to Terrain Studio');
     }
@@ -168,11 +171,13 @@ export default function App() {
   const handlePerfSetting = (key, value) => engine().setPerfSetting(key, value);
 
   const isInfinite = worldMode === 'infinite';
+  const isPlanet = worldMode === 'planet';
+  const isExplore = isInfinite || isPlanet;   // full-screen FPS-style modes
   const paintMode = !!paintState?.enabled;
-  const showStudioUI = !previewMode && !isInfinite && !paintMode;
+  const showStudioUI = !previewMode && !isExplore && !paintMode;
 
   return (
-    <div id="app" className={`${previewMode ? 'preview-mode' : ''} ${isInfinite ? 'infinite-mode' : ''}`}>
+    <div id="app" className={`${previewMode ? 'preview-mode' : ''} ${isExplore ? 'infinite-mode' : ''}`}>
       <TopBar
         previewMode={previewMode}
         worldMode={worldMode}
@@ -187,7 +192,7 @@ export default function App() {
         onToggleHelp={() => setHelpVisible((v) => !v)}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenExport={() => setExportModalOpen(true)}
-        onToggleWorldMode={toggleWorldMode}
+        onSetWorldMode={selectWorldMode}
         paintMode={paintMode}
         onTogglePaintMode={() => engine().setPaintMode(!paintMode)}
       />
@@ -213,7 +218,7 @@ export default function App() {
         <div className="viewport-area">
           <canvas id="viewport" ref={canvasRef} />
 
-          <div id="help-card" className={helpVisible && !isInfinite ? '' : 'hidden'}>
+          <div id="help-card" className={helpVisible && !isExplore ? '' : 'hidden'}>
             <div className="help-row"><span className="help-ic">🖐</span> Drag to pan</div>
             <div className="help-row"><span className="help-ic">🖱</span> Scroll to zoom</div>
             <div className="help-row"><span className="help-ic">↻</span> Right-click + drag to orbit</div>
@@ -247,10 +252,11 @@ export default function App() {
             />
           )}
 
-          {isInfinite && (
+          {isExplore && (
             <InfiniteHUD
               stats={infiniteStats}
-              onReturn={toggleWorldMode}
+              isPlanet={isPlanet}
+              onReturn={() => selectWorldMode('studio')}
               playerMode={playerMode}
               onPlayerMode={togglePlayerMode}
               quality={qualityPreset}
@@ -300,9 +306,9 @@ export default function App() {
         stats={stats}
         worldMode={worldMode}
         infiniteStats={infiniteStats}
-        qualityPreset={isInfinite ? qualityPreset : null}
+        qualityPreset={isExplore ? qualityPreset : null}
         playerMode={playerMode}
-        playerState={isInfinite ? infiniteStats?.playerState : playerState}
+        playerState={isExplore ? infiniteStats?.playerState : playerState}
       />
 
       <SettingsModal

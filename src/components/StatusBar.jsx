@@ -39,6 +39,18 @@ export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats
             )}
           </>
         )}
+        {worldMode === 'planet' && (
+          <>
+            <span className="sb-sep" />
+            <span>Planet</span>
+            {infiniteStats && (
+              <>
+                <span className="sb-sep" />
+                <span>Visible: {infiniteStats.visibleChunks} / {infiniteStats.chunks}</span>
+              </>
+            )}
+          </>
+        )}
       </div>
       <div className="sb-group">
         <span>Triangles: {fmtTris(stats.triangles)}</span>

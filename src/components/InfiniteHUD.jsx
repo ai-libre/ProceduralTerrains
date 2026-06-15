@@ -16,7 +16,7 @@ const PLAYER_STATE_LABELS = {
 };
 
 export default function InfiniteHUD({
-  stats, onReturn,
+  stats, onReturn, isPlanet,
   playerMode, onPlayerMode,
   quality, onQualityChange,
   timeOfDay, onTimeOfDay,

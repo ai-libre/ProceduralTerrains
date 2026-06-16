@@ -1,0 +1,128 @@
+import * as THREE from 'three';
+import { CLOUD_NOISE_GLSL, CLOUD_FIELD_GLSL, CLOUD_SLAB_GLSL } from './cloudGLSL.js';
+
+// ============================================================================
+// CloudSlabShader: the flat-mode (studio board) analog of CloudVolumeShader.
+// Instead of a spherical shell it raymarches a horizontal slab between two
+// world-Y planes (uCloudBottom..uCloudTop), fading out past a horizontal radius
+// so the clouds sit over the board like a diorama layer.
+//
+// Shares the noise + cloud-field GLSL and all cloud uniforms with the spherical
+// shader — only the geometry of the marched volume differs. Drawn on a large
+// horizontal plane with depthTest off; the slab segment is found analytically
+// from the ray vs the two Y planes (clamped to uCloudFar to bound the horizon).
+//
+// Step counts are compile-time #defines (statically bounded loops) exactly as
+// in the spherical shader, to keep the ANGLE/D3D11 compiler happy.
+// ============================================================================
+
+const VERTEX = /* glsl */ `
+varying vec3 vWorldPos;
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorldPos = wp.xyz;
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+
+const FRAGMENT = /* glsl */ `
+precision highp float;
+
+${CLOUD_NOISE_GLSL}
+${CLOUD_FIELD_GLSL}
+${CLOUD_SLAB_GLSL}
+
+varying vec3 vWorldPos;
+
+void main() {
+  vec3 ro = cameraPosition;
+  vec3 rd = normalize(vWorldPos - cameraPosition);
+
+  // intersect the ray with the two horizontal slab planes
+  float t0, t1;
+  if (abs(rd.y) < 1e-5) {
+    // near-horizontal ray: only inside the slab if the camera already is
+    if (ro.y <= uCloudBottom || ro.y >= uCloudTop) discard;
+    t0 = 0.0;
+    t1 = uCloudFar;
+  } else {
+    float ta = (uCloudBottom - ro.y) / rd.y;
+    float tb = (uCloudTop - ro.y) / rd.y;
+    t0 = max(min(ta, tb), 0.0);
+    t1 = min(max(ta, tb), uCloudFar);
+  }
+  if (t1 <= t0) discard;
+
+  float segLen = t1 - t0;
+  float stepLen = segLen / float(CLOUD_STEPS);
+
+  float dither = cl_hash13(vWorldPos * 0.5 + uCloudTime);
+  float t = t0 + stepLen * dither;
+
+  float transmittance = 1.0;
+  vec3 scatter = vec3(0.0);
+  vec3 ambient = uCloudShadowColor * uCloudShadowStrength;
+
+  for (int i = 0; i < CLOUD_STEPS; i++) {
+    if (transmittance > 0.01) {
+      vec3 P = ro + rd * t;
+      float dens = cloudDensity(P);
+      if (dens > 0.001) {
+        float light = uCloudSelfShadow > 0.5 ? cl_lightTransmittance(P) : 1.0;
+        vec3 lit = mix(ambient, uCloudColor, light) * (0.55 + 0.45 * uCloudScattering * light);
+        float dT = exp(-dens * stepLen * uCloudExtinction);
+        scatter += transmittance * (1.0 - dT) * lit;
+        transmittance *= dT;
+      }
+    }
+    t += stepLen;
+  }
+
+  float alpha = 1.0 - transmittance;
+  if (alpha < 0.004) discard;
+
+  vec3 col = scatter / max(alpha, 1e-4);
+  col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2));
+  gl_FragColor = vec4(col, alpha);
+}
+`;
+
+export function createCloudSlabMaterial(steps = 64, lightSteps = 6) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uCloudBottom:          { value: 900 },
+      uCloudTop:             { value: 1520 },
+      uCloudRadius:          { value: 1500 },
+      uCloudFar:             { value: 9000 },
+      uCloudCenter:          { value: new THREE.Vector3() },
+      uCloudCoverage:        { value: 0.5 },
+      uCloudSoftness:        { value: 0.16 },
+      uCloudScale:           { value: 1.0 },
+      uCloudDetailScale:     { value: 3.0 },
+      uCloudDetailStrength:  { value: 0.35 },
+      uCloudErosionScale:    { value: 6.0 },
+      uCloudErosionStrength: { value: 0.30 },
+      uCloudExtinction:      { value: 0.013 },
+      uCloudLightAbsorption: { value: 1.1 },
+      uCloudShadowStrength:  { value: 0.6 },
+      uCloudScattering:      { value: 1.0 },
+      uCloudColor:           { value: new THREE.Color(1, 1, 1) },
+      uCloudShadowColor:     { value: new THREE.Color(0.42, 0.47, 0.60) },
+      uCloudWind:            { value: new THREE.Vector3() },
+      uCloudRotation:        { value: 0.0 },
+      uCloudTime:            { value: 0.0 },
+      uCloudSelfShadow:      { value: 1.0 },
+      uCloudSunDir:          { value: new THREE.Vector3(0.4, 0.7, 0.5).normalize() },
+    },
+    defines: {
+      CLOUD_STEPS: Math.max(8, Math.round(steps)),
+      CLOUD_LIGHT_STEPS: Math.max(1, Math.round(lightSteps)),
+    },
+    vertexShader: VERTEX,
+    fragmentShader: FRAGMENT,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    side: THREE.DoubleSide,    // visible from above and below the slab plane
+  });
+}

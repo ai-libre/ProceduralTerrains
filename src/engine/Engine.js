@@ -4,6 +4,8 @@ import { createWaterMaterial, createInfiniteWaterMaterial } from './terrain/Wate
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
 import { PlanetWorld } from './terrain/PlanetWorld.js';
+import { PlanetCloudLayer } from './sky/PlanetCloudLayer.js';
+import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
 import { createPlanetMaterial, createPlanetWaterMaterial } from './terrain/PlanetMaterial.js';
 import { PlanetHeightSampler } from './terrain/PlanetHeightSampler.js';
 import { PlanetOrbitControls } from './PlanetOrbitControls.js';
@@ -107,6 +109,7 @@ export class Engine {
     this.planetWaterMat = null;
     this.planetControls = null;
     this.planetSampler = null;
+    this.planetCloudLayer = null;
     this.planetFaceGrid = 8;
     this._compiledKeys = new Set();   // mode:octave shader sets already compiled
 
@@ -206,6 +209,12 @@ export class Engine {
 
     // camera-underwater post effect (inactive above water — zero cost)
     this.underwater = new UnderwaterEffect();
+
+    // studio/flat-board volumetric cloud slab (sits above the board; hidden
+    // until enabled). Planet mode has its own spherical PlanetCloudLayer.
+    this.studioCloud = new CloudSlabLayer(this.scene, {
+      compile: (mats) => this._compileMaterialVariants(mats),
+    });
   }
 
   _initControls() {
@@ -238,6 +247,13 @@ export class Engine {
   setParam(key, value) {
     this.params[key] = value;
     this.cb.onParams({ ...this.params });
+
+    // cloud params: live shader updates only (never rebuild terrain/planet,
+    // never mix into terrain generation)
+    if (key.startsWith('cloud')) {
+      this._applyCloudSettings();
+      return;
+    }
 
     // planet geometry params: rebuild the cube-sphere (chunk layout / radius)
     if (key === 'planetRadius' || key === 'planetFaceGrid') {
@@ -536,6 +552,7 @@ export class Engine {
     this._updatePlinth();
     this.planetStyle.applyToUniforms(u);
     this._applyStudioFogFromStyle();
+    this._applyCloudSettings();   // slab altitude/scale track board height + size
     this._applyPixelRatio();
   }
 
@@ -825,6 +842,7 @@ export class Engine {
     // Infinite exploration stays fully procedural; Studio paint layers are
     // board-local overrides and are restored when returning to Studio mode.
     this.uniforms.uPaintEnabled.value = 0;
+    if (this.studioCloud) this.studioCloud.setInScene(false);
 
     // Hide studio objects
     this.board.group.visible = false;
@@ -958,6 +976,10 @@ export class Engine {
     this.board.group.visible = true;
     this.plinth.visible = true;
     this.water.visible = this.params.seaLevel > 0.5;
+    if (this.studioCloud) {
+      this.studioCloud.setInScene(true);
+      this._applyCloudSettings();
+    }
 
     this._applyUniforms();
     this.uniforms.uPaintEnabled.value = 1;
@@ -1028,6 +1050,7 @@ export class Engine {
     const p = this.params;
     // planet is fully procedural — Studio paint layers don't apply
     this.uniforms.uPaintEnabled.value = 0;
+    if (this.studioCloud) this.studioCloud.setInScene(false);
 
     // hide studio objects + sleep the editor camera
     this.board.group.visible = false;
@@ -1039,6 +1062,17 @@ export class Engine {
     this._applyUniforms();
 
     this._buildPlanetWorld();
+
+    // volumetric cloud shell (drawn around the globe; raymarched in-shader).
+    // Self-contained — never touches the planet world / water / LOD / export.
+    this.planetCloudLayer = new PlanetCloudLayer(this.scene, {
+      planetRadius: this._planetRadius(),
+      compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
+    });
+    this._applyCloudSettings();
+    // warm the cloud program in the background so first enable doesn't hang
+    this._compileMaterialVariants([this.planetCloudLayer.material], { canvasOnly: true })
+      .catch((e) => console.warn('Cloud shader warmup failed', e));
 
     // open-space backdrop (procedural sky is added in a later pass)
     this.scene.background = new THREE.Color(0x05070d);
@@ -1066,10 +1100,23 @@ export class Engine {
     this.camera.updateProjectionMatrix();
   }
 
+  /** Sync the current cloud params into whichever cloud layer(s) exist (no
+   *  rebuild). Both layers read the same cloud* params; each is only visible in
+   *  its own world mode. */
+  _applyCloudSettings() {
+    if (this.planetCloudLayer) {
+      this.planetCloudLayer.applyParams(this.params, this._planetRadius());
+    }
+    if (this.studioCloud) {
+      this.studioCloud.applyParams(this.params, this._maxHeight(), this.boardSize);
+    }
+  }
+
   /** Rebuild the planet for a radius / face-grid change (settings panel). */
   _rebuildPlanet() {
     if (this.worldMode !== 'planet') return;
     this._buildPlanetWorld();
+    this._applyCloudSettings();   // inner/outer shell radii track planetRadius
     this._applyPlanetCamera();
     // re-clamp the orbit distance to the new radius without snapping the view
     const c = this.planetControls;
@@ -1128,6 +1175,7 @@ export class Engine {
   /** Dispose the planet-mode systems (does not restore studio). */
   _disposePlanet() {
     if (this.player) { this.player.dispose(); this.player = null; }
+    if (this.planetCloudLayer) { this.planetCloudLayer.dispose(); this.planetCloudLayer = null; }
     if (this.planetWorld) { this.planetWorld.dispose(); this.planetWorld = null; }
     if (this.planetWater) {
       this.scene.remove(this.planetWater);
@@ -1525,6 +1573,10 @@ export class Engine {
       this.controls.update(dt);
     }
 
+    if (this.studioCloud) {
+      this.studioCloud.update(dt, this.camera.position, this.uniforms.uSunDir.value);
+    }
+
     // Cull invisible chunks based on current camera frustum and facing
     this.board.cull(this.camera);
 
@@ -1625,6 +1677,9 @@ export class Engine {
     }
 
     if (this.planetWorld) this.planetWorld.update(this.camera.position, this.camera);
+    if (this.planetCloudLayer) {
+      this.planetCloudLayer.update(dt, this.camera.position, this.uniforms.uSunDir.value);
+    }
 
     // feed the studio LOD inspector (throttled) — same callback as studio
     if (this.planetWorld && now - this._lastLodUpdate > 150) {
@@ -1682,6 +1737,7 @@ export class Engine {
     if (this.worldMode === 'infinite') this._disposeInfinite();
     else if (this.worldMode === 'planet') this._disposePlanet();
     else if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
+    if (this.studioCloud) { this.studioCloud.dispose(); this.studioCloud = null; }
     this.board.dispose();
     this.minimap.dispose();
     this.underwater.dispose();

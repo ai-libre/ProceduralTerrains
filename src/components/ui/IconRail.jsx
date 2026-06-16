@@ -4,6 +4,7 @@ const SECTIONS = [
   { id: 'section-noise', label: 'Noise', title: 'Noise' },
   { id: 'section-planet-style', label: 'Style', title: 'Planet Style' },
   { id: 'section-water', label: 'Water', title: 'Water' },
+  { id: 'section-clouds', label: 'Clouds', title: 'Clouds' },
   { id: 'section-materials', label: 'Biomes', title: 'Materials / Biomes' },
 ];
 
@@ -33,6 +34,11 @@ const ICONS = {
     <svg viewBox="0 0 20 20" fill="none">
       <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.4" />
       <ellipse cx="10" cy="10" rx="3" ry="6.5" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  ),
+  'section-clouds': (
+    <svg viewBox="0 0 20 20" fill="none">
+      <path d="M5 14a3 3 0 0 1 .5-5.95A4.2 4.2 0 0 1 14 8.3a3 3 0 0 1-.4 5.7H5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
     </svg>
   ),
   'section-materials': (

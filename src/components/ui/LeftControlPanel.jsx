@@ -5,6 +5,7 @@ import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
 import PlanetStylePanel from '../PlanetStylePanel.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import ControlSection from './ControlSection.jsx';
+import CloudPanel from './CloudPanel.jsx';
 
 const TERRAIN_SLIDERS = [
   {
@@ -300,6 +301,7 @@ function SectionIcon({ children }) {
 
 export default function LeftControlPanel({
   params,
+  worldMode,
   onParam,
   onPreset,
   onRandomizeSeed,
@@ -477,6 +479,14 @@ export default function LeftControlPanel({
             </div>
           ))}
         </ControlSection>
+
+        <CloudPanel
+          id="section-clouds"
+          params={params}
+          onParam={onParam}
+          worldMode={worldMode}
+          defaultOpen={false}
+        />
 
         <ControlSection
           id="section-materials"

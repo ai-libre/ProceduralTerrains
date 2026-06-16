@@ -3,6 +3,8 @@
 // patch on top of the defaults — nothing is hardcoded into the shader.
 // ============================================================================
 
+import { CLOUD_DEFAULT_PARAMS } from './sky/CloudSettings.js';
+
 export const DEFAULT_PARAMS = {
   seed: 1337,
   preset: 'highlands',
@@ -58,6 +60,10 @@ export const DEFAULT_PARAMS = {
   planetPreset: 'earth',
   palettePreset: 'earth',
   noisePreset: 'default',
+
+  // volumetric cloud shell (planet mode) — serializes with every save; old
+  // saves without these keys fall back to the cloud defaults on load.
+  ...CLOUD_DEFAULT_PARAMS,
 };
 
 export const PRESETS = {

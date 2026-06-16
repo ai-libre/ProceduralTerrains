@@ -40,6 +40,11 @@ export const PERF_LIMITS = {
   waterWaves:            { min: 0,       max: 1.5 },
   waterDistance:         { min: 0.25,    max: 1.0 },
   fogDistance:           { min: 0.4,     max: 2.0 },
+  cloudSteps:            { min: 8,       max: 128 },
+  cloudLightSteps:       { min: 1,       max: 12 },
+  cloudOctaves:          { min: 1,       max: 6 },
+  cloudDetailOctaves:    { min: 0,       max: 5 },
+  cloudMaxDistance:      { min: 1.5,     max: 12.0 },
 };
 
 // Each preset is a complete snapshot of every tunable value. 'high' matches
@@ -52,6 +57,9 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 1.5,
     waterQuality: 0, waterReflection: 0.6, waterDetail: 0.4, waterWaves: 0.7,
     waterDistance: 0.6, fogDistance: 0.8,
+    cloudSteps: 16, cloudLightSteps: 2, cloudSelfShadow: false,
+    cloudOctaves: 3, cloudDetailOctaves: 0, cloudUseErosion: false,
+    cloudMaxDistance: 3.0, cloudFallback: 'lite',
   },
   balanced: {
     label: 'Balanced',
@@ -60,6 +68,9 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 1.2,
     waterQuality: 1, waterReflection: 0.85, waterDetail: 0.7, waterWaves: 0.85,
     waterDistance: 0.8, fogDistance: 0.9,
+    cloudSteps: 32, cloudLightSteps: 4, cloudSelfShadow: false,
+    cloudOctaves: 4, cloudDetailOctaves: 2, cloudUseErosion: true,
+    cloudMaxDistance: 4.5, cloudFallback: 'none',
   },
   high: {
     label: 'High',
@@ -68,6 +79,9 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 1.0,
     waterQuality: 2, waterReflection: 1.0, waterDetail: 1.0, waterWaves: 1.0,
     waterDistance: 1.0, fogDistance: 1.0,
+    cloudSteps: 64, cloudLightSteps: 6, cloudSelfShadow: true,
+    cloudOctaves: 5, cloudDetailOctaves: 4, cloudUseErosion: true,
+    cloudMaxDistance: 6.0, cloudFallback: 'none',
   },
   ultra: {
     label: 'Ultra',
@@ -76,6 +90,9 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 0.8,
     waterQuality: 2, waterReflection: 1.2, waterDetail: 1.2, waterWaves: 1.0,
     waterDistance: 1.0, fogDistance: 1.2,
+    cloudSteps: 96, cloudLightSteps: 8, cloudSelfShadow: true,
+    cloudOctaves: 5, cloudDetailOctaves: 5, cloudUseErosion: true,
+    cloudMaxDistance: 8.0, cloudFallback: 'none',
   },
 };
 
@@ -189,6 +206,15 @@ export function sanitizePerfSettings(settings) {
   s.autoPerf = !!s.autoPerf;
   // underwater camera effect — only costs anything while submerged
   s.underwaterEffect = s.underwaterEffect !== false;
+
+  s.cloudSteps = Math.round(clamp(+s.cloudSteps || 64, PERF_LIMITS.cloudSteps));
+  s.cloudLightSteps = Math.round(clamp(+s.cloudLightSteps || 6, PERF_LIMITS.cloudLightSteps));
+  s.cloudOctaves = Math.round(clamp(+s.cloudOctaves || 5, PERF_LIMITS.cloudOctaves));
+  s.cloudDetailOctaves = Math.round(clamp(+s.cloudDetailOctaves || 4, PERF_LIMITS.cloudDetailOctaves));
+  s.cloudUseErosion = s.cloudUseErosion !== false;
+  s.cloudSelfShadow = s.cloudSelfShadow !== false;
+  s.cloudMaxDistance = clamp(+s.cloudMaxDistance || 6.0, PERF_LIMITS.cloudMaxDistance);
+  s.cloudFallback = s.cloudFallback || 'none';
 
   const segSrc = Array.isArray(s.lodSegments) ? s.lodSegments : BASE_LOD_SEGMENTS;
   s.lodSegments = BASE_LOD_SEGMENTS.map((def, i) =>

@@ -98,8 +98,11 @@ void main() {
  * Create the volumetric cloud material.
  * @param {number} steps       primary raymarch step count (compile-time)
  * @param {number} lightSteps  secondary (sun) march step count (compile-time)
+ * @param {number} octaves     base noise FBM octave count (compile-time)
+ * @param {number} detailOctaves detail noise FBM octave count (compile-time)
+ * @param {boolean} useErosion whether to use cellular erosion (compile-time)
  */
-export function createCloudMaterial(steps = 64, lightSteps = 6) {
+export function createCloudMaterial(steps = 64, lightSteps = 6, octaves = 5, detailOctaves = 4, useErosion = true) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uCloudInner:           { value: 16240 },
@@ -126,6 +129,9 @@ export function createCloudMaterial(steps = 64, lightSteps = 6) {
     defines: {
       CLOUD_STEPS: Math.max(8, Math.round(steps)),
       CLOUD_LIGHT_STEPS: Math.max(1, Math.round(lightSteps)),
+      CLOUD_OCTAVES: Math.max(1, Math.round(octaves)),
+      CLOUD_DETAIL_OCTAVES: Math.max(0, Math.round(detailOctaves)),
+      CLOUD_USE_EROSION: useErosion ? 1 : 0,
     },
     vertexShader: VERTEX,
     fragmentShader: FRAGMENT,

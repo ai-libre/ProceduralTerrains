@@ -32,6 +32,9 @@ export class PlanetCloudLayer {
 
     this._steps = 64;
     this._lightSteps = 6;
+    this._octaves = 5;
+    this._detailOctaves = 4;
+    this._useErosion = true;
     this._enabled = false;
     this._inRange = true;
     this._maxDistance = Infinity;
@@ -39,7 +42,7 @@ export class PlanetCloudLayer {
     this._wind = new THREE.Vector3();
     this._lastParams = null;
 
-    this.material = createCloudMaterial(this._steps, this._lightSteps);
+    this.material = createCloudMaterial(this._steps, this._lightSteps, this._octaves, this._detailOctaves, this._useErosion);
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), this.material);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 20;        // after terrain (default) + water (10)
@@ -57,18 +60,26 @@ export class PlanetCloudLayer {
    * it whenever a cloud param changes or the planet radius changes.
    * @param {object} params engine params (with cloud* keys)
    * @param {number} planetRadius
+   * @param {object} [perf] centralized performance settings
    */
-  applyParams(params, planetRadius) {
+  applyParams(params, planetRadius, perf) {
     this.planetRadius = planetRadius || this.planetRadius;
     this._lastParams = params;
 
-    const q = resolveCloudQuality(params);
+    const config = perf ? { ...params, ...perf } : params;
+    const q = resolveCloudQuality(config);
     this._enabled = !!params.cloudsEnabled && !q.disabled;
-    this._maxDistance = (params.cloudMaxDistance || 6) * this.planetRadius;
 
-    // recompile if the step counts changed (quality / fallback)
-    if (q.steps !== this._steps || q.lightSteps !== this._lightSteps) {
-      this._rebuildMaterial(q.steps, q.lightSteps);
+    const maxDistMult = config.cloudMaxDistance ?? 6;
+    this._maxDistance = maxDistMult * this.planetRadius;
+
+    // recompile if the step counts or noise settings changed (quality / fallback)
+    if (q.steps !== this._steps ||
+        q.lightSteps !== this._lightSteps ||
+        q.octaves !== this._octaves ||
+        q.detailOctaves !== this._detailOctaves ||
+        q.useErosion !== this._useErosion) {
+      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion);
     }
 
     const u = this.material.uniforms;
@@ -116,10 +127,13 @@ export class PlanetCloudLayer {
   }
 
   /** Swap the cloud material for a new step count (compile-time #define). */
-  _rebuildMaterial(steps, lightSteps) {
+  _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion) {
     this._steps = steps;
     this._lightSteps = lightSteps;
-    const next = createCloudMaterial(steps, lightSteps);
+    this._octaves = octaves;
+    this._detailOctaves = detailOctaves;
+    this._useErosion = useErosion;
+    const next = createCloudMaterial(steps, lightSteps, octaves, detailOctaves, useErosion);
     // carry over current uniform values
     const a = this.material.uniforms, b = next.uniforms;
     for (const k in b) {

@@ -87,7 +87,7 @@ void main() {
 }
 `;
 
-export function createCloudSlabMaterial(steps = 64, lightSteps = 6) {
+export function createCloudSlabMaterial(steps = 64, lightSteps = 6, octaves = 5, detailOctaves = 4, useErosion = true) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uCloudBottom:          { value: 900 },
@@ -117,6 +117,9 @@ export function createCloudSlabMaterial(steps = 64, lightSteps = 6) {
     defines: {
       CLOUD_STEPS: Math.max(8, Math.round(steps)),
       CLOUD_LIGHT_STEPS: Math.max(1, Math.round(lightSteps)),
+      CLOUD_OCTAVES: Math.max(1, Math.round(octaves)),
+      CLOUD_DETAIL_OCTAVES: Math.max(0, Math.round(detailOctaves)),
+      CLOUD_USE_EROSION: useErosion ? 1 : 0,
     },
     vertexShader: VERTEX,
     fragmentShader: FRAGMENT,

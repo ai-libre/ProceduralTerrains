@@ -54,10 +54,13 @@ const mat3 CL_ROT = mat3(
   -0.60, -0.48,  0.64
 );
 
-// 5-octave value-noise FBM (fixed octave count)
-float cl_fbm(vec3 p) {
+// Base FBM value noise
+float cl_fbm_base(vec3 p) {
   float amp = 0.5, sum = 0.0, norm = 0.0;
-  for (int i = 0; i < 5; i++) {
+  #ifndef CLOUD_OCTAVES
+  #define CLOUD_OCTAVES 5
+  #endif
+  for (int i = 0; i < CLOUD_OCTAVES; i++) {
     sum += amp * cl_vnoise(p);
     norm += amp;
     amp *= 0.5;
@@ -65,6 +68,20 @@ float cl_fbm(vec3 p) {
   }
   return sum / max(norm, 1e-4);
 }
+
+// Detail FBM value noise (compiled out if detail octaves is 0)
+#if defined(CLOUD_DETAIL_OCTAVES) && CLOUD_DETAIL_OCTAVES > 0
+float cl_fbm_detail(vec3 p) {
+  float amp = 0.5, sum = 0.0, norm = 0.0;
+  for (int i = 0; i < CLOUD_DETAIL_OCTAVES; i++) {
+    sum += amp * cl_vnoise(p);
+    norm += amp;
+    amp *= 0.5;
+    p = CL_ROT * p * 2.02;
+  }
+  return sum / max(norm, 1e-4);
+}
+#endif
 
 // Worley / cellular noise (F1) over a fixed 3×3×3 neighbourhood — returns the
 // distance to the nearest feature point. Used to erode wispy cloud edges.
@@ -117,10 +134,17 @@ vec3 cl_domain(vec3 P) {
 // (BEFORE altitude falloff — each shader applies its own).
 float cloudShape(vec3 q) {
   vec3 drift = uCloudWind * uCloudTime;
-  float base   = cl_fbm(q * uCloudScale + drift);
-  float detail = cl_fbm(q * uCloudDetailScale + drift * 1.7);
-  float ero    = cl_worley(q * uCloudErosionScale);
-  float n = clamp(base + detail * uCloudDetailStrength - ero * uCloudErosionStrength, 0.0, 1.0);
+  float base = cl_fbm_base(q * uCloudScale + drift);
+  float n = base;
+  #if defined(CLOUD_DETAIL_OCTAVES) && CLOUD_DETAIL_OCTAVES > 0
+  float detail = cl_fbm_detail(q * uCloudDetailScale + drift * 1.7);
+  n += detail * uCloudDetailStrength;
+  #endif
+  #if defined(CLOUD_USE_EROSION) && CLOUD_USE_EROSION > 0
+  float ero = cl_worley(q * uCloudErosionScale);
+  n -= ero * uCloudErosionStrength;
+  #endif
+  n = clamp(n, 0.0, 1.0);
   // coverage: higher slider -> lower threshold -> more cloud
   float threshold = 1.0 - uCloudCoverage;
   return smoothstep(threshold, threshold + uCloudSoftness, n);

@@ -54,10 +54,10 @@ export const CLOUD_DEFAULT_PARAMS = {
 // #defines in the shader (dynamic loop bounds hang the ANGLE/D3D11 compiler),
 // so changing quality swaps the define and recompiles in the background.
 export const CLOUD_QUALITY_PRESETS = {
-  low:    { steps: 24, lightSteps: 3 },
-  medium: { steps: 40, lightSteps: 4 },
-  high:   { steps: 64, lightSteps: 6 },
-  ultra:  { steps: 96, lightSteps: 8 },
+  low:    { steps: 24, lightSteps: 2, octaves: 3, detailOctaves: 0, useErosion: false },
+  medium: { steps: 40, lightSteps: 4, octaves: 4, detailOctaves: 2, useErosion: true },
+  high:   { steps: 64, lightSteps: 6, octaves: 5, detailOctaves: 4, useErosion: true },
+  ultra:  { steps: 96, lightSteps: 8, octaves: 5, detailOctaves: 5, useErosion: true },
 };
 
 // Fallback modes for weaker devices. They clamp the resolved quality and can
@@ -73,16 +73,56 @@ export const CLOUD_FALLBACK_MODES = {
  * Resolve the effective step counts + self-shadow flag from the chosen quality
  * preset and fallback mode. Pure function — no THREE dependency.
  * @param {object} params engine params (or any object with the cloud* keys)
- * @returns {{steps:number, lightSteps:number, selfShadow:boolean, disabled:boolean}}
+ * @returns {{steps:number, lightSteps:number, octaves:number, detailOctaves:number, useErosion:boolean, selfShadow:boolean, disabled:boolean}}
  */
 export function resolveCloudQuality(params) {
-  const preset = CLOUD_QUALITY_PRESETS[params.cloudQuality] || CLOUD_QUALITY_PRESETS.high;
-  const fb = CLOUD_FALLBACK_MODES[params.cloudFallback] || CLOUD_FALLBACK_MODES.none;
+  const fallback = params.cloudFallback || 'none';
+  const fb = CLOUD_FALLBACK_MODES[fallback] || CLOUD_FALLBACK_MODES.none;
   if (fb.disabled) {
-    return { steps: 0, lightSteps: 0, selfShadow: false, disabled: true };
+    return {
+      steps: 0,
+      lightSteps: 0,
+      octaves: 0,
+      detailOctaves: 0,
+      useErosion: false,
+      selfShadow: false,
+      disabled: true
+    };
   }
-  const steps = Math.max(8, Math.min(preset.steps, fb.maxSteps));
-  const lightSteps = Math.max(1, Math.min(preset.lightSteps, fb.allowSelfShadow ? preset.lightSteps : 1));
+
+  let steps = 64;
+  let lightSteps = 6;
+  let octaves = 5;
+  let detailOctaves = 4;
+  let useErosion = true;
+
+  if ('cloudSteps' in params) {
+    steps = params.cloudSteps;
+    lightSteps = params.cloudLightSteps;
+    octaves = params.cloudOctaves;
+    detailOctaves = params.cloudDetailOctaves;
+    useErosion = !!params.cloudUseErosion;
+  } else {
+    // legacy/params fallback
+    const preset = CLOUD_QUALITY_PRESETS[params.cloudQuality] || CLOUD_QUALITY_PRESETS.high;
+    steps = preset.steps;
+    lightSteps = preset.lightSteps;
+    octaves = preset.octaves ?? 5;
+    detailOctaves = preset.detailOctaves ?? 4;
+    useErosion = params.cloudUseErosion ?? preset.useErosion;
+  }
+
+  steps = Math.max(8, Math.min(steps, fb.maxSteps));
+  lightSteps = Math.max(1, Math.min(lightSteps, fb.allowSelfShadow ? lightSteps : 1));
   const selfShadow = !!params.cloudSelfShadow && fb.allowSelfShadow;
-  return { steps, lightSteps, selfShadow, disabled: false };
+
+  return {
+    steps,
+    lightSteps,
+    octaves,
+    detailOctaves,
+    useErosion,
+    selfShadow,
+    disabled: false
+  };
 }

@@ -21,6 +21,11 @@ const PERF_SLIDERS = {
   waterWaves: lim('waterWaves', 'Wave Complexity', 0.05, { digits: 2, unit: '×' }),
   waterDistance: lim('waterDistance', 'Water Distance', 0.05, { digits: 2, unit: '×' }),
   fogDistance: lim('fogDistance', 'Fog Distance', 0.05, { digits: 2, unit: '×' }),
+  cloudSteps: lim('cloudSteps', 'Raymarch Steps', 4),
+  cloudLightSteps: lim('cloudLightSteps', 'Shadow Steps', 1),
+  cloudOctaves: lim('cloudOctaves', 'Base Noise Octaves', 1),
+  cloudDetailOctaves: lim('cloudDetailOctaves', 'Detail Noise Octaves', 1),
+  cloudMaxDistance: lim('cloudMaxDistance', 'Max Distance', 0.5, { digits: 1, unit: '×' }),
 };
 
 const WATER_QUALITY_OPTIONS = [
@@ -35,6 +40,7 @@ const TABS = [
   { id: 'streaming', label: 'Streaming' },
   { id: 'water', label: 'Water' },
   { id: 'fog', label: 'Fog' },
+  { id: 'clouds', label: 'Clouds' },
 ];
 
 function LodMultiSlider({ segments, onChange }) {
@@ -332,6 +338,47 @@ function renderSettings({
 
       <SettingGroup tab="fog" label="Fog Distance" keywords="horizon haze atmosphere visibility" {...groupProps}>
         <PerfSlider perf={perf} id="fogDistance" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="clouds" label="Fallback Mode" keywords="clouds performance quality fallback mode" {...groupProps}>
+        <SelectRow
+          label="Fallback Mode"
+          value={perf.cloudFallback}
+          options={[
+            { value: 'none', label: 'Full' },
+            { value: 'lite', label: 'Lite (weak GPU)' },
+            { value: 'off', label: 'Off' }
+          ]}
+          onChange={(v) => onPerfSetting('cloudFallback', v)}
+        />
+      </SettingGroup>
+
+      <SettingGroup tab="clouds" label="Raymarch Steps" keywords="clouds step raymarch resolution quality steps" {...groupProps}>
+        <PerfSlider perf={perf} id="cloudSteps" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="clouds" label="Self-Shadowing" keywords="clouds shadow self lighting" {...groupProps}>
+        <ToggleRow label="Self-Shadowing" value={perf.cloudSelfShadow !== false} onChange={(v) => onPerfSetting('cloudSelfShadow', v)} />
+      </SettingGroup>
+
+      <SettingGroup tab="clouds" label="Shadow Steps" keywords="clouds shadow lighting steps" {...groupProps}>
+        <PerfSlider perf={perf} id="cloudLightSteps" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="clouds" label="Base Noise Octaves" keywords="clouds octaves noise fbm base" {...groupProps}>
+        <PerfSlider perf={perf} id="cloudOctaves" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="clouds" label="Detail Noise Octaves" keywords="clouds octaves detail noise fbm" {...groupProps}>
+        <PerfSlider perf={perf} id="cloudDetailOctaves" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="clouds" label="Erosion (Worley Noise)" keywords="clouds erosion cellular worley detail" {...groupProps}>
+        <ToggleRow label="Erosion (Worley Noise)" value={perf.cloudUseErosion !== false} onChange={(v) => onPerfSetting('cloudUseErosion', v)} />
+      </SettingGroup>
+
+      <SettingGroup tab="clouds" label="Max Distance" keywords="clouds max distance visibility culling" {...groupProps}>
+        <PerfSlider perf={perf} id="cloudMaxDistance" onPerfSetting={onPerfSetting} />
       </SettingGroup>
     </>
   );

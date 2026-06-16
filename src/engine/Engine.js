@@ -1105,10 +1105,10 @@ export class Engine {
    *  its own world mode. */
   _applyCloudSettings() {
     if (this.planetCloudLayer) {
-      this.planetCloudLayer.applyParams(this.params, this._planetRadius());
+      this.planetCloudLayer.applyParams(this.params, this._planetRadius(), this.perf);
     }
     if (this.studioCloud) {
-      this.studioCloud.applyParams(this.params, this._maxHeight(), this.boardSize);
+      this.studioCloud.applyParams(this.params, this._maxHeight(), this.boardSize, this.perf);
     }
   }
 
@@ -1287,6 +1287,8 @@ export class Engine {
       this.fogManager.updateFromViewDistance(s.viewRadius, this.params.chunkSize);
       if (this.proceduralSky) this._applyTimeOfDay();   // refresh fog color
     }
+
+    this._applyCloudSettings();
   }
 
   /** Water quality uniforms — per water material, never shared with terrain. */

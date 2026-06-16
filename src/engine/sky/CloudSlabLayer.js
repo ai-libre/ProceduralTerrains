@@ -25,6 +25,9 @@ export class CloudSlabLayer {
 
     this._steps = 64;
     this._lightSteps = 6;
+    this._octaves = 5;
+    this._detailOctaves = 4;
+    this._useErosion = true;
     this._enabled = false;
     this._inScene = true;       // gated off while another world mode is active
     this._inRange = true;
@@ -35,7 +38,7 @@ export class CloudSlabLayer {
     this._wind = new THREE.Vector3();
     this._boardSize = 2048;
 
-    this.material = createCloudSlabMaterial(this._steps, this._lightSteps);
+    this.material = createCloudSlabMaterial(this._steps, this._lightSteps, this._octaves, this._detailOctaves, this._useErosion);
 
     // a unit plane rotated flat (XZ); scaled to cover the board + sky margin
     const geo = new THREE.PlaneGeometry(1, 1);
@@ -61,16 +64,24 @@ export class CloudSlabLayer {
    * @param {object} params engine params (cloud* keys)
    * @param {number} maxHeight terrain height ceiling (unused — kept for API parity)
    * @param {number} boardSize world size of the board (drives horizontal scale)
+   * @param {object} [perf] centralized performance settings
    */
-  applyParams(params, maxHeight, boardSize) {
+  applyParams(params, maxHeight, boardSize, perf) {
     this._boardSize = boardSize || this._boardSize;
 
-    const q = resolveCloudQuality(params);
+    const config = perf ? { ...params, ...perf } : params;
+    const q = resolveCloudQuality(config);
     this._enabled = !!params.cloudsEnabled && !q.disabled;
-    this._maxDistance = (params.cloudMaxDistance || 6) * this._boardSize;
 
-    if (q.steps !== this._steps || q.lightSteps !== this._lightSteps) {
-      this._rebuildMaterial(q.steps, q.lightSteps);
+    const maxDistMult = config.cloudMaxDistance ?? 6;
+    this._maxDistance = maxDistMult * this._boardSize;
+
+    if (q.steps !== this._steps ||
+        q.lightSteps !== this._lightSteps ||
+        q.octaves !== this._octaves ||
+        q.detailOctaves !== this._detailOctaves ||
+        q.useErosion !== this._useErosion) {
+      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion);
     }
 
     const u = this.material.uniforms;
@@ -129,10 +140,13 @@ export class CloudSlabLayer {
     }
   }
 
-  _rebuildMaterial(steps, lightSteps) {
+  _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion) {
     this._steps = steps;
     this._lightSteps = lightSteps;
-    const next = createCloudSlabMaterial(steps, lightSteps);
+    this._octaves = octaves;
+    this._detailOctaves = detailOctaves;
+    this._useErosion = useErosion;
+    const next = createCloudSlabMaterial(steps, lightSteps, octaves, detailOctaves, useErosion);
     const a = this.material.uniforms, b = next.uniforms;
     for (const k in b) {
       if (!(k in a)) continue;

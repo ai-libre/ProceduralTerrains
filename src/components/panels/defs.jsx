@@ -1,3 +1,5 @@
+import { ColorInput } from '../controls.jsx';
+
 // Shared control definitions used across drawer panels (moved out of the old
 // LeftControlPanel so panels can import them directly).
 
@@ -134,7 +136,7 @@ export function ColorField({ label, icon, info, value, onChange }) {
         <span className="setting-label">{label}</span>
         {info && <InfoDot />}
       </div>
-      <input type="color" value={value} onChange={onChange} />
+      <ColorInput value={value} onChange={(hex) => onChange({ target: { value: hex } })} />
     </div>
   );
 }

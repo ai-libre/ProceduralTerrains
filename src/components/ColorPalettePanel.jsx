@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { COLOR_PALETTE_PRESETS } from '../engine/style/ColorPalettePresets.js';
 import { PLANET_GEN_TYPES } from '../engine/style/ColorPaletteGenerator.js';
 import { PALETTE_KEYS, colorToHex, parseColor } from '../engine/style/ColorPalette.js';
-import { SliderCtl } from './controls.jsx';
+import { ColorInput, SliderCtl } from './controls.jsx';
 
 const COLOR_GROUPS = [
   {
@@ -90,12 +90,10 @@ function PaletteSwatch({ colorKey, rgb, onChange }) {
     <label className="palette-color-row" title={COLOR_LABELS[colorKey]}>
       <span className="palette-color-chip" style={{ background: hex }} />
       <span className="palette-color-name">{COLOR_LABELS[colorKey]}</span>
-      <input
-        key={hex}
-        type="color"
+      <ColorInput
         className="palette-color-input"
         value={hex}
-        onChange={(e) => onChange(colorKey, parseColor(e.target.value))}
+        onChange={(v) => onChange(colorKey, parseColor(v))}
       />
     </label>
   );

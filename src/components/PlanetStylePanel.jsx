@@ -15,10 +15,25 @@ export default function PlanetStylePanel({
   onExportStyle,
   onImportStyle,
   embedded = false,
+  paletteOnly = false,
 }) {
   const style = planetStyle ?? {};
 
-  const content = (
+  const palettePanel = (
+    <ColorPalettePanel
+      planetStyle={style}
+      palettePreset={palettePreset}
+      terrainSeed={terrainSeed}
+      onPalettePreset={onPalettePreset}
+      onGenerate={onGeneratePalette}
+      onColorChange={onColorChange}
+      onTuning={onTuning}
+      onExport={onExportStyle}
+      onImport={onImportStyle}
+    />
+  );
+
+  const content = paletteOnly ? palettePanel : (
     <>
       <div className="subsection-label">Preset</div>
       <PlanetPresetPanel
@@ -28,17 +43,7 @@ export default function PlanetStylePanel({
       />
 
       <div className="subsection-label">Palette</div>
-      <ColorPalettePanel
-        planetStyle={style}
-        palettePreset={palettePreset}
-        terrainSeed={terrainSeed}
-        onPalettePreset={onPalettePreset}
-        onGenerate={onGeneratePalette}
-        onColorChange={onColorChange}
-        onTuning={onTuning}
-        onExport={onExportStyle}
-        onImport={onImportStyle}
-      />
+      {palettePanel}
     </>
   );
 

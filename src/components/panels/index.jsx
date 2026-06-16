@@ -22,7 +22,16 @@ const ic = (children) => <svg viewBox="0 0 20 20" fill="none">{children}</svg>;
 export const PANEL_META = {
   terrain: { label: 'Terrain', title: 'Terrain', desc: 'Shape and surface generation.', icon: ic(<path d="M3 15 L8 6 L11 10 L14 7 L17 15 Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />) },
   world: { label: 'World', title: 'World', desc: 'Chunking, streaming and grid.', icon: ic(<><rect x="3" y="3" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="3" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="3" y="11" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="11" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /></>) },
-  planet: { label: 'Planet', title: 'Planet', desc: 'Spherical world style and summary.', icon: ic(<><circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.4" /><ellipse cx="10" cy="10" rx="3" ry="6.5" stroke="currentColor" strokeWidth="1" /></>), modes: ['planet'] },
+  planet: {
+    label: 'Planet',
+    title: 'Planet',
+    desc: 'Spherical world style and summary.',
+    studioLabel: 'Colors',
+    studioTitle: 'Colors',
+    studioDesc: 'Biome palette and terrain material colors.',
+    icon: ic(<><circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.4" /><ellipse cx="10" cy="10" rx="3" ry="6.5" stroke="currentColor" strokeWidth="1" /></>),
+    modes: ['planet', 'studio'],
+  },
   biomes: { label: 'Biomes', title: 'Biomes', desc: 'Climate distribution and masks.', icon: ic(<><rect x="4" y="4" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="4" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="4" y="11" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="11" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /></>) },
   water: { label: 'Water', title: 'Water', desc: 'Ocean surface and colours.', icon: ic(<path d="M10 4c-2 3-5 5-5 8a5 5 0 0 0 10 0c0-3-3-5-5-8z" stroke="currentColor" strokeWidth="1.4" />) },
   clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: ic(<path d="M5 14a3 3 0 0 1 .5-5.95A4.2 4.2 0 0 1 14 8.3a3 3 0 0 1-.4 5.7H5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />) },
@@ -33,12 +42,25 @@ export const PANEL_META = {
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'world', 'planet', 'biomes', 'water', 'clouds', 'lighting', 'export', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'biomes', 'water', 'clouds', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
   if (!meta) return false;
   return !meta.modes || meta.modes.includes(worldMode);
+}
+
+export function getPanelDisplay(id, worldMode) {
+  const meta = PANEL_META[id];
+  if (!meta) return { label: id, title: id, desc: '' };
+  if (worldMode === 'studio' && meta.studioLabel) {
+    return {
+      label: meta.studioLabel,
+      title: meta.studioTitle ?? meta.studioLabel,
+      desc: meta.studioDesc ?? meta.desc,
+    };
+  }
+  return { label: meta.label, title: meta.title, desc: meta.desc };
 }
 
 // ---------------------------------------------------------------- helpers
@@ -128,11 +150,20 @@ function WorldPanel({ ctx }) {
 }
 
 function PlanetPanel({ ctx }) {
+  const isPlanet = ctx.worldMode === 'planet';
+  const { title, desc } = getPanelDisplay('planet', ctx.worldMode);
   return (
-    <SidePanel title="Planet" description="Spherical world style and summary." onClose={ctx.onClose}>
-      <WorldPanelInner params={ctx.params} worldMode="planet" onParam={ctx.onParam} />
-      <PlanetStylePanel {...ctx.planetStyleProps} embedded />
-      <PlanetSummaryCard params={ctx.params} />
+    <SidePanel title={title} description={desc} onClose={ctx.onClose}>
+      {isPlanet && (
+        <>
+          <WorldPanelInner params={ctx.params} worldMode="planet" onParam={ctx.onParam} />
+          <PlanetStylePanel {...ctx.planetStyleProps} embedded />
+          <PlanetSummaryCard params={ctx.params} />
+        </>
+      )}
+      {!isPlanet && (
+        <PlanetStylePanel {...ctx.planetStyleProps} embedded paletteOnly />
+      )}
     </SidePanel>
   );
 }

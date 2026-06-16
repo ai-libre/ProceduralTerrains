@@ -1,5 +1,5 @@
 import ControlSection from './ControlSection.jsx';
-import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
+import { SliderCtl, ToggleRow, SelectRow, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
 import { CLOUD_DEFAULT_PARAMS } from '../../engine/sky/CloudSettings.js';
 
@@ -119,10 +119,9 @@ export default function CloudPanel({ params, onParam, worldMode, id = 'inspector
               <div className="label-with-icon" data-tooltip={info}>
                 <span className="setting-label">{label}</span>
               </div>
-              <input
-                type="color"
+              <ColorInput
                 value={colorToHex(val(params, key) ?? def)}
-                onChange={(e) => onParam(key, parseColor(e.target.value))}
+                onChange={(v) => onParam(key, parseColor(v))}
               />
             </div>
           ))}

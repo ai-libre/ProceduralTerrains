@@ -1,5 +1,5 @@
 import ControlSection from './ControlSection.jsx';
-import { SliderCtl } from '../controls.jsx';
+import { SliderCtl, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
 
 const SUN_SLIDERS = [
@@ -127,10 +127,9 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
             </svg>
           </span>
         </div>
-        <input
-          type="color"
+        <ColorInput
           value={colorToHex(style.sunColor ?? [1.0, 0.94, 0.82])}
-          onChange={(e) => onTuning('sunColor', parseColor(e.target.value))}
+          onChange={(v) => onTuning('sunColor', parseColor(v))}
         />
       </div>
       <SliderCtl
@@ -159,10 +158,9 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
               </span>
             )}
           </div>
-          <input
-            type="color"
+          <ColorInput
             value={colorToHex(style[key] ?? [0.5, 0.5, 0.5])}
-            onChange={(e) => onTuning(key, parseColor(e.target.value))}
+            onChange={(v) => onTuning(key, parseColor(v))}
           />
         </div>
       ))}

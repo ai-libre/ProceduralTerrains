@@ -111,6 +111,20 @@ export function SelectRow({ label, value, options, format, onChange, icon, info 
   );
 }
 
+// Native color input that stays mounted while dragging in the picker.
+export function ColorInput({ value, onChange, className }) {
+  const commit = (e) => onChange(e.target.value);
+  return (
+    <input
+      type="color"
+      className={className}
+      value={value}
+      onInput={commit}
+      onChange={commit}
+    />
+  );
+}
+
 export function Panel({ id, title, className = '', children }) {
   const [open, setOpen] = useState(true);
   return (

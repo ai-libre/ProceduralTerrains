@@ -1109,6 +1109,15 @@ input[type="color"].palette-color-input {
 }
 .sb-group { display: flex; align-items: center; gap: 10px; }
 .sb-sep { width: 1px; height: 12px; background: rgba(255, 255, 255, 0.1); }
+.sb-github-link {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  opacity: 0.65;
+  transition: color 0.15s, opacity 0.15s;
+}
+.sb-github-link:hover { color: var(--text); opacity: 1; }
+.sb-github-link svg { width: 14px; height: 14px; }
 .status-dot {
   width: 7px;
   height: 7px;

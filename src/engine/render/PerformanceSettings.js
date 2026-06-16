@@ -215,6 +215,9 @@ export function sanitizePerfSettings(settings) {
   s.cloudSelfShadow = s.cloudSelfShadow !== false;
   s.cloudMaxDistance = clamp(+s.cloudMaxDistance || 6.0, PERF_LIMITS.cloudMaxDistance);
   s.cloudFallback = s.cloudFallback || 'none';
+  if (s.preset === 'performance') {
+    s.cloudSteps = Math.min(s.cloudSteps, 16);
+  }
 
   const segSrc = Array.isArray(s.lodSegments) ? s.lodSegments : BASE_LOD_SEGMENTS;
   s.lodSegments = BASE_LOD_SEGMENTS.map((def, i) =>

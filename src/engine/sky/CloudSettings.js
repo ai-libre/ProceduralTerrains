@@ -66,7 +66,7 @@ export function resolveCloudNoiseVariant(value) {
 // #defines in the shader (dynamic loop bounds hang the ANGLE/D3D11 compiler),
 // so changing quality swaps the define and recompiles in the background.
 export const CLOUD_QUALITY_PRESETS = {
-  low:    { steps: 24, lightSteps: 2, octaves: 3, detailOctaves: 0, useErosion: false },
+  low:    { steps: 16, lightSteps: 2, octaves: 3, detailOctaves: 0, useErosion: false },
   medium: { steps: 40, lightSteps: 4, octaves: 4, detailOctaves: 2, useErosion: true },
   high:   { steps: 64, lightSteps: 6, octaves: 5, detailOctaves: 4, useErosion: true },
   ultra:  { steps: 96, lightSteps: 8, octaves: 5, detailOctaves: 5, useErosion: true },
@@ -77,7 +77,7 @@ export const CLOUD_QUALITY_PRESETS = {
 // chosen quality preset.
 export const CLOUD_FALLBACK_MODES = {
   none: { label: 'Full', maxSteps: Infinity, allowSelfShadow: true, disabled: false },
-  lite: { label: 'Lite', maxSteps: 28, allowSelfShadow: false, disabled: false },
+  lite: { label: 'Lite', maxSteps: 16, allowSelfShadow: false, disabled: false },
   off:  { label: 'Off',  maxSteps: 0, allowSelfShadow: false, disabled: true },
 };
 

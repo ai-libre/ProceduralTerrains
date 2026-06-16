@@ -2,25 +2,30 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine } from './engine/Engine.js';
 import { DEFAULT_PARAMS } from './engine/presets.js';
 import { clonePlanetStyle } from './engine/style/PlanetStyleConfig.js';
+import { useLoading, blockingTask, nonBlockingTask } from './state/loading.jsx';
+import { panelAvailable } from './components/panels/index.jsx';
 import TopBar from './components/TopBar.jsx';
-import IconRail from './components/ui/IconRail.jsx';
-import LeftControlPanel from './components/ui/LeftControlPanel.jsx';
-import RightInspectorPanel from './components/ui/RightInspectorPanel.jsx';
+import LeftToolbar from './components/ui/LeftToolbar.jsx';
+import SideDrawer from './components/ui/SideDrawer.jsx';
 import BottomToolbar from './components/BottomToolbar.jsx';
 import StatusBar from './components/StatusBar.jsx';
-import SettingsModal from './components/SettingsModal.jsx';
 import InfiniteHUD from './components/InfiniteHUD.jsx';
-import ExportModal from './components/ExportModal.jsx';
 import MinimapOverlay from './components/MinimapOverlay.jsx';
 import PaintPanel from './components/paint/PaintPanel.jsx';
+import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
+import ToastContainer, { classifyToast } from './components/ui/Toast.jsx';
+
+const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 
 export default function App() {
   const canvasRef = useRef(null);
   const minimapBaseRef = useRef(null);
   const minimapOverlayRef = useRef(null);
-  const leftScrollRef = useRef(null);
   const engineRef = useRef(null);
-  const toastTimer = useRef(null);
+
+  const loading = useLoading();
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
 
   const [params, setParams] = useState({ ...DEFAULT_PARAMS });
   const [status, setStatus] = useState({ text: 'Booting…', busy: true });
@@ -33,11 +38,8 @@ export default function App() {
 
   const [camMode, setCamMode] = useState('orbit');
   const [helpVisible, setHelpVisible] = useState(true);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [exportModalOpen, setExportModalOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
-  const [toast, setToast] = useState(null);
-  const [activeSection, setActiveSection] = useState('section-generate');
+  const [activePanel, setActivePanel] = useState(null);
   const [paintState, setPaintState] = useState({ enabled: false });
 
   const [worldMode, setWorldMode] = useState('studio');
@@ -53,13 +55,27 @@ export default function App() {
   const [culledChunks, setCulledChunks] = useState(0);
   const [perf, setPerf] = useState(null);
 
-  const showToast = useCallback((msg) => {
-    setToast(msg);
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  // ---- toasts ----
+  const [toasts, setToasts] = useState([]);
+  const toastId = useRef(0);
+  const pushToast = useCallback((msg, type = 'info') => {
+    const id = ++toastId.current;
+    setToasts((prev) => [...prev, { id, msg, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 2800);
   }, []);
+  const showToast = useCallback((msg, type) => pushToast(msg, type ?? classifyToast(msg)), [pushToast]);
+
+  // refs read by stable engine callbacks
+  const blockingActiveRef = useRef(false);
+  const blockingUpdateRef = useRef(null); // current blocking task's update fn
+  const bootedRef = useRef(false);
+  const exportFailedRef = useRef(false);
+
+  blockingActiveRef.current = !!blockingTask(loading.tasks);
 
   useEffect(() => {
+    loadingRef.current.start('boot', { blocking: true, label: 'Loading Terrain Studio…', detail: 'Initializing engine' });
+
     const engine = new Engine({
       canvas: canvasRef.current,
       minimapBase: minimapBaseRef.current,
@@ -71,7 +87,16 @@ export default function App() {
             planetStyle: next.planetStyle ? clonePlanetStyle(next.planetStyle) : next.planetStyle,
           });
         },
-        onStatus: (text, busy) => setStatus({ text, busy }),
+        onStatus: (text, busy) => {
+          setStatus({ text, busy });
+          // feed the active blocking task's detail line
+          if (busy && blockingUpdateRef.current) blockingUpdateRef.current({ detail: text });
+          // clear the initial boot overlay once the engine is first ready
+          if (!busy && !bootedRef.current) {
+            bootedRef.current = true;
+            loadingRef.current.done('boot');
+          }
+        },
         onStats: setStats,
         onLod: (counts, count, visible, culled) => {
           setLodCounts(counts);
@@ -81,7 +106,13 @@ export default function App() {
         },
         onCamera: setCamInfo,
         onBoard: setBoardSize,
-        onToast: showToast,
+        onToast: (msg) => {
+          const type = classifyToast(msg);
+          if (/fail|error/i.test(msg)) exportFailedRef.current = true;
+          // suppress progress (info) toasts while a blocking overlay is up
+          if (blockingActiveRef.current && type === 'info') return;
+          pushToast(msg, type);
+        },
         onFirstInteract: () => setHelpVisible(false),
         onInfiniteStats: setInfiniteStats,
         onPlayerMode: setPlayerMode,
@@ -97,20 +128,16 @@ export default function App() {
     engineRef.current = engine;
     setGpu(engine.gpuName);
     if (import.meta.env.DEV) window.terrainStudio = engine;
-    return () => engine.dispose();
+    // safety: never leave the boot overlay stuck
+    const bootTimer = setTimeout(() => {
+      if (!bootedRef.current) { bootedRef.current = true; loadingRef.current.done('boot'); }
+    }, 8000);
+    return () => { clearTimeout(bootTimer); engine.dispose(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showToast]);
+  }, [pushToast]);
 
   const engine = () => engineRef.current;
   const onParam = (key, value) => engine().setParam(key, value);
-
-  const scrollToSection = (sectionId) => {
-    const el = leftScrollRef.current?.querySelector(`[data-section="${sectionId}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setActiveSection(sectionId);
-    }
-  };
 
   const planetStyleProps = {
     planetStyle: params.planetStyle,
@@ -128,97 +155,129 @@ export default function App() {
     onImportStyle: (json) => json && engine().importPlanetStyleJSON(json),
   };
 
+  // ---- mode switching: blocking overlay + transition lock ----
+  const modeLockRef = useRef(false);
+  const [modeLocked, setModeLocked] = useState(false);
   const selectWorldMode = (next) => {
-    if (next === worldMode) return;
-    engine().setWorldMode(next);
-    setWorldMode(next);
-    if (next === 'infinite') {
-      setHelpVisible(false);
-      showToast('Entered Infinite World — click to lock mouse');
-    } else if (next === 'planet') {
-      setHelpVisible(false);
-      showToast('Entered Planet mode — drag to orbit, scroll to zoom');
-    } else {
-      showToast('Returned to Terrain Studio');
-    }
+    if (next === worldMode || modeLockRef.current) return;
+    modeLockRef.current = true;
+    setModeLocked(true);
+    const label = MODE_LABEL[next] ?? next;
+    if (!panelAvailable(activePanel, next)) setActivePanel(null);
+
+    loading.run('mode', { blocking: true, label: `Switching to ${label}…`, detail: 'Preparing scene…' }, async (update) => {
+      blockingUpdateRef.current = update;
+      update({ detail: 'Disposing current scene…' });
+      engine().setWorldMode(next);      // heavy, synchronous
+      setWorldMode(next);
+      update({ detail: 'Finalizing…' });
+      await new Promise((r) => setTimeout(r, 60));
+    }).then(() => {
+      showToast(`Switched to ${label}`, 'success');
+      if (next === 'infinite') { setHelpVisible(false); showToast('Click to lock mouse', 'info'); }
+      else if (next === 'planet') { setHelpVisible(false); }
+    }).catch((e) => {
+      console.error(e);
+      showToast('Mode switch failed', 'error');
+    }).finally(() => {
+      blockingUpdateRef.current = null;
+      modeLockRef.current = false;
+      setModeLocked(false);
+    });
   };
 
-  const togglePlayerMode = () => {
-    engine().setPlayerMode(!playerMode);
+  const togglePlayerMode = () => engine().setPlayerMode(!playerMode);
+  const handleQualityChange = (key) => { engine().setQuality(key); setQualityPreset(key); };
+  const handleTimeOfDay = (value) => { engine().setTimeOfDay(value); setTimeOfDay(value); };
+  const handleBehindCameraCulling = (enabled) => { engine().setBehindCameraCulling(enabled); setBehindCameraCulling(enabled); };
+  const handleCullingEnabled = (enabled) => { engine().setCullingEnabled(enabled); setCullingEnabled(enabled); };
+
+  // ---- export: blocking overlay, button disabled via panel busy state ----
+  const onExport = (options) => {
+    exportFailedRef.current = false;
+    return loading.run('export', { blocking: true, label: 'Exporting…', detail: 'Preparing scene…' }, async (update) => {
+      blockingUpdateRef.current = update;
+      try {
+        await engine().export3DTerrain(options);
+      } finally {
+        blockingUpdateRef.current = null;
+      }
+    }).then(() => {
+      if (!exportFailedRef.current) showToast('Export complete', 'success');
+    });
   };
 
-  const handleQualityChange = (key) => {
-    engine().setQuality(key);
-    setQualityPreset(key);
-  };
+  const onExportScreenshot = () => { engine().exportScreenshot(); };
+  const onExportHeightmap = () => { engine().exportHeightmap(); };
 
-  const handleTimeOfDay = (value) => {
-    engine().setTimeOfDay(value);
-    setTimeOfDay(value);
+  const onRegenerate = () => {
+    loading.run('regen', { blocking: false, label: 'Regenerating…' }, async () => {
+      engine().regenerate();
+      await new Promise((r) => setTimeout(r, 30));
+    });
   };
-
-  const handleBehindCameraCulling = (enabled) => {
-    engine().setBehindCameraCulling(enabled);
-    setBehindCameraCulling(enabled);
-  };
-
-  const handleCullingEnabled = (enabled) => {
-    engine().setCullingEnabled(enabled);
-    setCullingEnabled(enabled);
-  };
-
-  const handlePerfPreset = (key) => engine().setPerfPreset(key);
-  const handlePerfSetting = (key, value) => engine().setPerfSetting(key, value);
 
   const isStudio = worldMode === 'studio';
   const isInfinite = worldMode === 'infinite';
   const isPlanet = worldMode === 'planet';
   const paintMode = !!paintState?.enabled;
-  // Planet orbit behaves like Studio (full editor panels + orbit camera);
-  // walking the planet — or Infinite mode — uses the minimal FPS overlay.
   const planetWalking = isPlanet && playerMode;
   const fpsView = isInfinite || planetWalking;
   const studioLike = isStudio || (isPlanet && !playerMode);
   const showStudioUI = !previewMode && !paintMode && studioLike;
+
+  const togglePanel = (id) => setActivePanel((cur) => (cur === id ? null : id));
+  const effectivePanel = showStudioUI && panelAvailable(activePanel, worldMode) ? activePanel : null;
+
+  const block = blockingTask(loading.tasks);
+  const nonBlock = nonBlockingTask(loading.tasks);
+
+  const ctx = {
+    params, worldMode, onParam,
+    onPreset: (key) => engine().applyPresetByKey(key),
+    onRandomizeSeed: () => engine().randomizeSeed(),
+    onRegenerate,
+    planetStyleProps,
+    onStyleTuning: (key, v) => engine().setPlanetStyleTuning(key, v),
+    camInfo, camMode,
+    onMode: (mode) => { engine().setCameraMode(mode); setCamMode(mode); },
+    onFov: (fov) => engine().setFov(fov),
+    onFocusCenter: () => engine().focusCenter(),
+    lodCounts, chunkCount, boardSize, visibleChunks, culledChunks,
+    cullingEnabled, behindCameraCulling,
+    onCullingEnabled: handleCullingEnabled, onBehindCameraCulling: handleBehindCameraCulling,
+    stats, gpu, perf,
+    onPerfPreset: (key) => engine().setPerfPreset(key),
+    onPerfSetting: (key, value) => engine().setPerfSetting(key, value),
+    onPerfReset: () => engine().resetPerfSettings(),
+    timeOfDay, onTimeOfDay: handleTimeOfDay,
+    onExport, onExportScreenshot, onExportHeightmap,
+  };
 
   return (
     <div id="app" className={`${previewMode ? 'preview-mode' : ''} ${fpsView ? 'infinite-mode' : ''}`}>
       <TopBar
         previewMode={previewMode}
         worldMode={worldMode}
+        modeLocked={modeLocked}
         onNew={() => engine().newProject()}
         onRandomize={() => engine().randomizeSeed()}
         onSave={() => engine().saveSeed()}
-        onLoadJSON={(json) => (json ? engine().loadSeedJSON(json) : showToast('Could not parse seed file'))}
-        onExportScreenshot={() => engine().exportScreenshot()}
-        onExportHeightmap={() => engine().exportHeightmap()}
+        onLoadJSON={(json) => (json ? engine().loadSeedJSON(json) : showToast('Could not parse seed file', 'error'))}
         onTogglePreview={() => setPreviewMode(!previewMode)}
         onResetView={() => engine().resetView()}
         onToggleHelp={() => setHelpVisible((v) => !v)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenExport={() => setExportModalOpen(true)}
         onSetWorldMode={selectWorldMode}
         paintMode={paintMode}
         onTogglePaintMode={() => engine().setPaintMode(!paintMode)}
+        onOpenPanel={togglePanel}
+        activePanel={effectivePanel}
+        loading={nonBlock}
       />
 
       <div id="main" className="app-shell">
         {showStudioUI && (
-          <IconRail activeId={activeSection} onSelect={scrollToSection} />
-        )}
-
-        {showStudioUI && (
-          <LeftControlPanel
-            params={params}
-            worldMode={worldMode}
-            onParam={onParam}
-            onPreset={(key) => engine().applyPresetByKey(key)}
-            onRandomizeSeed={() => engine().randomizeSeed()}
-            onRegenerate={() => engine().regenerate()}
-            planetStyleProps={planetStyleProps}
-            scrollContainerRef={leftScrollRef}
-            onSectionVisible={setActiveSection}
-          />
+          <LeftToolbar activePanel={effectivePanel} worldMode={worldMode} onSelect={togglePanel} />
         )}
 
         <div className="viewport-area">
@@ -277,33 +336,12 @@ export default function App() {
               onRandomPlanet={() => engine().randomizePlanetPreset()}
             />
           )}
+
+          {block && <LoadingOverlay task={block} />}
         </div>
 
         {showStudioUI && (
-          <RightInspectorPanel
-            params={params}
-            worldMode={worldMode}
-            camInfo={camInfo}
-            camMode={camMode}
-            onMode={(mode) => { engine().setCameraMode(mode); setCamMode(mode); }}
-            onFov={(fov) => engine().setFov(fov)}
-            onFocusCenter={() => engine().focusCenter()}
-            onParam={onParam}
-            onStyleTuning={(key, v) => engine().setPlanetStyleTuning(key, v)}
-            lodCounts={lodCounts}
-            chunkCount={chunkCount}
-            boardSize={boardSize}
-            baseRef={minimapBaseRef}
-            overlayRef={minimapOverlayRef}
-            stats={stats}
-            gpu={gpu}
-            visibleChunks={visibleChunks}
-            culledChunks={culledChunks}
-            cullingEnabled={cullingEnabled}
-            behindCameraCulling={behindCameraCulling}
-            onCullingEnabled={handleCullingEnabled}
-            onBehindCameraCulling={handleBehindCameraCulling}
-          />
+          <SideDrawer activePanel={effectivePanel} ctx={ctx} onClose={() => setActivePanel(null)} />
         )}
       </div>
 
@@ -318,23 +356,7 @@ export default function App() {
         playerState={fpsView ? infiniteStats?.playerState : playerState}
       />
 
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        perf={perf}
-        onPerfPreset={handlePerfPreset}
-        onPerfSetting={handlePerfSetting}
-        onPerfReset={() => engine().resetPerfSettings()}
-      />
-
-      <ExportModal
-        open={exportModalOpen}
-        params={params}
-        onClose={() => setExportModalOpen(false)}
-        onExport={(options) => engine().export3DTerrain(options)}
-      />
-
-      <div id="toast" className={toast ? 'show' : ''}>{toast}</div>
+      <ToastContainer toasts={toasts} />
     </div>
   );
 }

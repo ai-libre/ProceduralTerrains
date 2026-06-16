@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
+import { FlatPanelContext } from '../panels/PanelContext.js';
 
 export default function ControlSection({
   id,
@@ -9,7 +10,23 @@ export default function ControlSection({
   children,
   onToggle,
 }) {
+  const flat = useContext(FlatPanelContext);
   const [open, setOpen] = useState(defaultOpen);
+
+  // Inside a drawer panel: render a plain, always-open labelled group with no
+  // collapsable folder chrome.
+  if (flat) {
+    return (
+      <section className="panel-group" id={id} data-section={id}>
+        <div className="panel-group-header">
+          {icon && <span className="panel-group-icon">{icon}</span>}
+          <span className="panel-group-title">{title}</span>
+          {statusDot && <span className={`control-section-dot${statusDot === 'active' ? ' active' : ''}`} />}
+        </div>
+        <div className="panel-group-body">{children}</div>
+      </section>
+    );
+  }
 
   const toggle = () => {
     const next = !open;

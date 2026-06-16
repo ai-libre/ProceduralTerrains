@@ -1,9 +1,12 @@
+// Performance settings content (search + sub-tabs + body), shared by the
+// Performance drawer panel. Extracted from the old SettingsModal so the same
+// controls live in one place.
 import { useMemo, useRef, useState } from 'react';
-import { SliderCtl, ToggleRow, SelectRow } from './controls.jsx';
+import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import {
   PERF_PRESETS, PERF_LIMITS, getPerfPresetKeys,
   resolveLodSegments, resolveLodDistances, estimateTriangles,
-} from '../engine/render/PerformanceSettings.js';
+} from '../../engine/render/PerformanceSettings.js';
 
 const lim = (key, label, step, opts = {}) => ({
   key, label, step, min: PERF_LIMITS[key].min, max: PERF_LIMITS[key].max, ...opts,
@@ -61,9 +64,7 @@ function LodMultiSlider({ segments, onChange }) {
       const target = Math.pow(2, lmin + x * (lmax - lmin));
       const cur = segmentsRef.current;
       const factor = target / cur[i];
-      onChange(cur.map((s) =>
-        Math.round(Math.min(max, Math.max(min, s * factor)))
-      ));
+      onChange(cur.map((s) => Math.round(Math.min(max, Math.max(min, s * factor)))));
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
@@ -98,9 +99,7 @@ function LodMultiSlider({ segments, onChange }) {
 
 function PerfSlider({ perf, id, onPerfSetting }) {
   const def = PERF_SLIDERS[id];
-  return (
-    <SliderCtl def={def} value={perf[def.key]} onChange={(v) => onPerfSetting(def.key, v)} />
-  );
+  return <SliderCtl def={def} value={perf[def.key]} onChange={(v) => onPerfSetting(def.key, v)} />;
 }
 
 function SettingGroup({ tab, label, keywords, search, activeTab, children }) {
@@ -108,7 +107,6 @@ function SettingGroup({ tab, label, keywords, search, activeTab, children }) {
   const q = search.trim().toLowerCase();
   const visible = q ? haystack.includes(q) : tab === activeTab;
   if (!visible) return null;
-
   return (
     <div className="settings-field" data-setting-tab={tab} data-setting-label={label}>
       {q && <span className="settings-field-tab">{TABS.find((t) => t.id === tab)?.label}</span>}
@@ -123,9 +121,7 @@ function SettingNote({ tab, text, search, activeTab }) {
   return <p className="settings-note">{text}</p>;
 }
 
-export default function SettingsModal({
-  open, onClose, perf, onPerfPreset, onPerfSetting, onPerfReset,
-}) {
+export default function PerfSettings({ perf, onPerfPreset, onPerfSetting, onPerfReset }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [search, setSearch] = useState('');
 
@@ -134,11 +130,11 @@ export default function SettingsModal({
     { value: 'custom', label: 'Custom' },
   ], []);
 
-  if (!open) return null;
+  if (!perf) return <p className="settings-empty">Performance settings are loading…</p>;
 
-  const segments = perf ? resolveLodSegments(perf) : [];
-  const distances = perf ? resolveLodDistances(perf) : [];
-  const estTris = perf ? estimateTriangles(perf) : 0;
+  const segments = resolveLodSegments(perf);
+  const distances = resolveLodDistances(perf);
+  const estTris = estimateTriangles(perf);
   const isSearching = search.trim().length > 0;
 
   const setLodDistance = (i, v) => {
@@ -148,75 +144,47 @@ export default function SettingsModal({
   };
 
   const groupProps = { search, activeTab };
+  const body = renderSettings({ perf, presetOptions, segments, distances, estTris, setLodDistance, onPerfPreset, onPerfSetting, onPerfReset, groupProps });
 
   return (
-    <div className="modal settings-modal" onClick={(e) => e.target.classList.contains('modal') && onClose()}>
-      <div className="settings-modal-card" onClick={(e) => e.stopPropagation()}>
-        <header className="settings-modal-header">
-          <div className="settings-modal-title">
-            <svg viewBox="0 0 16 16" width="18" height="18" fill="none" aria-hidden>
-              <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.2" />
-              <path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2" stroke="currentColor" strokeWidth="1.2" />
-            </svg>
-            <span>Project Settings</span>
-          </div>
-          <button type="button" className="settings-modal-close" onClick={onClose} aria-label="Close">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-            </svg>
-          </button>
-        </header>
-
-        <div className="settings-modal-toolbar">
-          <div className="settings-search-wrap">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
-              <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.2" />
-              <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-            </svg>
-            <input
-              type="search"
-              className="settings-search-input"
-              placeholder="Search settings…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {search && (
-              <button type="button" className="settings-search-clear" onClick={() => setSearch('')} aria-label="Clear search">
-                ✕
-              </button>
-            )}
-          </div>
-        </div>
-
-        {!isSearching && (
-          <nav className="settings-tabs" aria-label="Settings categories">
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                className={`settings-tab${activeTab === tab.id ? ' active' : ''}`}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </nav>
+    <div className="perf-settings">
+      <div className="settings-search-wrap">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
+          <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.2" />
+          <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+        </svg>
+        <input
+          type="search"
+          className="settings-search-input"
+          placeholder="Search settings…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        {search && (
+          <button type="button" className="settings-search-clear" onClick={() => setSearch('')} aria-label="Clear search">✕</button>
         )}
+      </div>
 
-        <div className="settings-modal-body">
-          {!perf ? (
-            <p className="settings-empty">Performance settings are loading…</p>
-          ) : isSearching ? (
-            <div className="settings-search-results">
-              <p className="settings-search-hint">Search results</p>
-              {renderSettings({ perf, presetOptions, segments, distances, estTris, setLodDistance, onPerfPreset, onPerfSetting, onPerfReset, groupProps })}
-            </div>
-          ) : (
-            <div className="settings-tab-panel">
-              {renderSettings({ perf, presetOptions, segments, distances, estTris, setLodDistance, onPerfPreset, onPerfSetting, onPerfReset, groupProps })}
-            </div>
-          )}
+      {!isSearching && (
+        <div className="panel-tabs" role="tablist">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={`panel-tab${activeTab === tab.id ? ' active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
+      )}
+
+      <div className="perf-settings-body">
+        {isSearching && <p className="settings-search-hint">Search results</p>}
+        {body}
       </div>
     </div>
   );
@@ -243,9 +211,7 @@ function renderSettings({
       <SettingNote tab="overview" text={`Worst-case visible triangles: ~${(estTris / 1e6).toFixed(2)}M`} {...groupProps} />
 
       <SettingGroup tab="overview" label="Reset Performance" keywords="restore defaults" {...groupProps}>
-        <button type="button" className="action-btn perf-reset-btn" onClick={onPerfReset}>
-          Reset Performance Settings
-        </button>
+        <button type="button" className="action-btn perf-reset-btn" onClick={onPerfReset}>Reset Performance Settings</button>
       </SettingGroup>
 
       <SettingGroup tab="lod" label="Terrain Resolution" keywords="mesh detail segments" {...groupProps}>
@@ -263,22 +229,9 @@ function renderSettings({
       <SettingNote tab="lod" text={`Effective segments: ${segments.join(' / ')}`} {...groupProps} />
 
       {perf.lodDistances.map((d, i) => (
-        <SettingGroup
-          key={`lod-dist-${i}`}
-          tab="lod"
-          label={`LOD ${i} → ${i + 1} Distance`}
-          keywords={`lod distance threshold chunk level ${i}`}
-          {...groupProps}
-        >
+        <SettingGroup key={`lod-dist-${i}`} tab="lod" label={`LOD ${i} → ${i + 1} Distance`} keywords={`lod distance threshold chunk level ${i}`} {...groupProps}>
           <SliderCtl
-            def={{
-              label: `LOD${i}→${i + 1} Distance`,
-              min: PERF_LIMITS.lodDistance.min,
-              max: PERF_LIMITS.lodDistance.max,
-              step: 0.5,
-              digits: 1,
-              unit: '× chunk',
-            }}
+            def={{ label: `LOD${i}→${i + 1} Distance`, min: PERF_LIMITS.lodDistance.min, max: PERF_LIMITS.lodDistance.max, step: 0.5, digits: 1, unit: '× chunk' }}
             value={d}
             onChange={(v) => setLodDistance(i, v)}
           />
@@ -308,12 +261,7 @@ function renderSettings({
       </SettingGroup>
 
       <SettingGroup tab="water" label="Water Quality" keywords="shader reflection detail waves" {...groupProps}>
-        <SelectRow
-          label="Water Quality"
-          value={perf.waterQuality}
-          options={WATER_QUALITY_OPTIONS}
-          onChange={(v) => onPerfSetting('waterQuality', parseInt(v, 10))}
-        />
+        <SelectRow label="Water Quality" value={perf.waterQuality} options={WATER_QUALITY_OPTIONS} onChange={(v) => onPerfSetting('waterQuality', parseInt(v, 10))} />
       </SettingGroup>
 
       <SettingGroup tab="water" label="Water Reflection" keywords="specular glint sun" {...groupProps}>
@@ -341,16 +289,7 @@ function renderSettings({
       </SettingGroup>
 
       <SettingGroup tab="clouds" label="Fallback Mode" keywords="clouds performance quality fallback mode" {...groupProps}>
-        <SelectRow
-          label="Fallback Mode"
-          value={perf.cloudFallback}
-          options={[
-            { value: 'none', label: 'Full' },
-            { value: 'lite', label: 'Lite (weak GPU)' },
-            { value: 'off', label: 'Off' }
-          ]}
-          onChange={(v) => onPerfSetting('cloudFallback', v)}
-        />
+        <SelectRow label="Fallback Mode" value={perf.cloudFallback} options={[{ value: 'none', label: 'Full' }, { value: 'lite', label: 'Lite (weak GPU)' }, { value: 'off', label: 'Off' }]} onChange={(v) => onPerfSetting('cloudFallback', v)} />
       </SettingGroup>
 
       <SettingGroup tab="clouds" label="Raymarch Steps" keywords="clouds step raymarch resolution quality steps" {...groupProps}>

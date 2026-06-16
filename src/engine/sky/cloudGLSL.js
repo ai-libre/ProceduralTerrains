@@ -198,8 +198,14 @@ uniform float uCloudTop;          // slab top world Y
 uniform float uCloudRadius;       // horizontal fade radius
 uniform float uCloudFar;          // clamp marched distance (horizon bound)
 uniform vec3  uCloudCenter;       // board center (xz used)
+#ifdef CLOUD_TERRAIN_OCCLUSION
+uniform float uCloudTerrainClearance;
+#endif
 
 float cloudDensity(vec3 P) {
+#ifdef CLOUD_TERRAIN_OCCLUSION
+  if (P.y <= heightAt(P.xz) + uCloudTerrainClearance) return 0.0;
+#endif
   float hf = (P.y - uCloudBottom) / max(uCloudTop - uCloudBottom, 1e-3);
   if (hf <= 0.0 || hf >= 1.0) return 0.0;
   float fall = smoothstep(0.0, 0.18, hf) * smoothstep(1.0, 0.78, hf);

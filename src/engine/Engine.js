@@ -214,6 +214,8 @@ export class Engine {
     // until enabled). Planet mode has its own spherical PlanetCloudLayer.
     this.studioCloud = new CloudSlabLayer(this.scene, {
       compile: (mats) => this._compileMaterialVariants(mats),
+      terrainUniforms: this.uniforms,
+      terrainOctaves: Math.round(this.params.octaves),
     });
   }
 

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { CLOUD_NOISE_GLSL, CLOUD_FIELD_GLSL, CLOUD_SLAB_GLSL } from './cloudGLSL.js';
+import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, HEIGHT_GLSL } from '../terrain/terrainGLSL.js';
+import { BIOME_GLSL } from '../terrain/biomeGLSL.js';
 
 // ============================================================================
 // CloudSlabShader: the flat-mode (studio board) analog of CloudVolumeShader.
@@ -9,8 +11,10 @@ import { CLOUD_NOISE_GLSL, CLOUD_FIELD_GLSL, CLOUD_SLAB_GLSL } from './cloudGLSL
 //
 // Shares the noise + cloud-field GLSL and all cloud uniforms with the spherical
 // shader — only the geometry of the marched volume differs. Drawn on a large
-// horizontal plane with depthTest off; the slab segment is found analytically
-// from the ray vs the two Y planes (clamped to uCloudFar to bound the horizon).
+// horizontal plane after opaque terrain has populated the depth buffer; the slab
+// segment is found analytically from the ray vs the two Y planes (clamped to
+// uCloudFar to bound the horizon). In studio mode, terrain samples are also
+// rejected inside cloudDensity so clouds cannot appear inside the height field.
 //
 // Step counts are compile-time #defines (statically bounded loops) exactly as
 // in the spherical shader, to keep the ANGLE/D3D11 compiler happy.
@@ -30,6 +34,10 @@ precision highp float;
 
 ${CLOUD_NOISE_GLSL}
 ${CLOUD_FIELD_GLSL}
+${COMMON_UNIFORMS_GLSL}
+${NOISE_GLSL}
+${BIOME_GLSL}
+${HEIGHT_GLSL}
 ${CLOUD_SLAB_GLSL}
 
 varying vec3 vWorldPos;
@@ -87,14 +95,16 @@ void main() {
 }
 `;
 
-export function createCloudSlabMaterial(steps = 64, lightSteps = 6, octaves = 5, detailOctaves = 4, useErosion = true) {
+export function createCloudSlabMaterial(steps = 64, lightSteps = 6, octaves = 5, detailOctaves = 4, useErosion = true, terrainUniforms = {}, terrainOctaves = 7) {
   return new THREE.ShaderMaterial({
     uniforms: {
+      ...terrainUniforms,
       uCloudBottom:          { value: 900 },
       uCloudTop:             { value: 1520 },
       uCloudRadius:          { value: 1500 },
       uCloudFar:             { value: 9000 },
       uCloudCenter:          { value: new THREE.Vector3() },
+      uCloudTerrainClearance:{ value: 2.0 },
       uCloudCoverage:        { value: 0.5 },
       uCloudSoftness:        { value: 0.16 },
       uCloudScale:           { value: 1.0 },
@@ -120,12 +130,14 @@ export function createCloudSlabMaterial(steps = 64, lightSteps = 6, octaves = 5,
       CLOUD_OCTAVES: Math.max(1, Math.round(octaves)),
       CLOUD_DETAIL_OCTAVES: Math.max(0, Math.round(detailOctaves)),
       CLOUD_USE_EROSION: useErosion ? 1 : 0,
+      CLOUD_TERRAIN_OCCLUSION: 1,
+      OCTAVES: Math.max(1, Math.round(terrainOctaves)),
     },
     vertexShader: VERTEX,
     fragmentShader: FRAGMENT,
     transparent: true,
     depthWrite: false,
-    depthTest: false,
+    depthTest: true,
     side: THREE.DoubleSide,    // visible from above and below the slab plane
   });
 }

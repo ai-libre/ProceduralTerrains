@@ -73,15 +73,6 @@ export class PlanetCloudLayer {
     const maxDistMult = config.cloudMaxDistance ?? 6;
     this._maxDistance = maxDistMult * this.planetRadius;
 
-    // recompile if the step counts or noise settings changed (quality / fallback)
-    if (q.steps !== this._steps ||
-        q.lightSteps !== this._lightSteps ||
-        q.octaves !== this._octaves ||
-        q.detailOctaves !== this._detailOctaves ||
-        q.useErosion !== this._useErosion) {
-      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion);
-    }
-
     const u = this.material.uniforms;
     const r = this.planetRadius;
     const inner = r + (params.cloudAltitude ?? 240);
@@ -124,6 +115,16 @@ export class PlanetCloudLayer {
     u.uCloudWind.value.copy(this._wind);
 
     this._rotSpeed = (params.cloudRotationSpeed ?? 0.35) * 0.01;
+
+    // recompile if the step counts or noise settings changed (quality / fallback)
+    // We check and rebuild at the end so _rebuildMaterial can copy the fully updated uniforms to the new material.
+    if (q.steps !== this._steps ||
+        q.lightSteps !== this._lightSteps ||
+        q.octaves !== this._octaves ||
+        q.detailOctaves !== this._detailOctaves ||
+        q.useErosion !== this._useErosion) {
+      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion);
+    }
   }
 
   /** Swap the cloud material for a new step count (compile-time #define). */

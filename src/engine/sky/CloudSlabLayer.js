@@ -76,14 +76,6 @@ export class CloudSlabLayer {
     const maxDistMult = config.cloudMaxDistance ?? 6;
     this._maxDistance = maxDistMult * this._boardSize;
 
-    if (q.steps !== this._steps ||
-        q.lightSteps !== this._lightSteps ||
-        q.octaves !== this._octaves ||
-        q.detailOctaves !== this._detailOctaves ||
-        q.useErosion !== this._useErosion) {
-      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion);
-    }
-
     const u = this.material.uniforms;
     // Altitude is an ABSOLUTE world height (y=0 is the ground/sea base), so the
     // layer can sit anywhere from ground level up — not pinned above the peaks.
@@ -130,6 +122,16 @@ export class CloudSlabLayer {
     u.uCloudWind.value.copy(this._wind);
 
     this._rotSpeed = (params.cloudRotationSpeed ?? 0.35) * 0.01;
+
+    // recompile if the step counts or noise settings changed (quality / fallback)
+    // We check and rebuild at the end so _rebuildMaterial can copy the fully updated uniforms to the new material.
+    if (q.steps !== this._steps ||
+        q.lightSteps !== this._lightSteps ||
+        q.octaves !== this._octaves ||
+        q.detailOctaves !== this._detailOctaves ||
+        q.useErosion !== this._useErosion) {
+      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion);
+    }
 
     // warm the program in the background on first enable (no first-frame hang)
     if (this._enabled && !this._ready && !this._warming && this._compile) {

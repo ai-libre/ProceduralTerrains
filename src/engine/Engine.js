@@ -960,10 +960,17 @@ export class Engine {
     if (enabled) {
       // orbit camera sleeps while walking (frees the click for pointer lock)
       if (this.planetControls) { this.planetControls.dispose(); this.planetControls = null; }
+      // Near chunks are coarse (one quad spans chunkSpan / lodSegments[0] world
+      // units), so the flat triangles can sit above the exact sampled point.
+      // Tell the controller that quad size so it can keep the body on top of the
+      // faceted mesh instead of sinking under it.
+      const pw = this.planetWorld;
+      const quadSize = pw ? pw.chunkSpan / (pw.lodSegments[0] || 64) : 62.5;
       this.player = new PlanetController({
         camera: this.camera,
         domElement: this.canvas,
         sampler: this._getPlanetSampler(),
+        config: { groundSampleSpread: quadSize },
       });
       this.cb.onToast('Planet walk — click to lock mouse · Space jump · Shift run');
     } else {

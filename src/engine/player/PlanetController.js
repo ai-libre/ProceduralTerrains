@@ -34,10 +34,15 @@ export class PlanetController {
     this.sampler = sampler;
     this.cfg = { ...DEFAULT_PLAYER_CONFIG, ...config };
 
+    // How wide a render facet is, in world units (set by the Engine from the
+    // near-LOD quad size). The mesh is flat over each quad, so we sample the
+    // surface across a neighbourhood this big and keep the body on top of it.
+    this.groundSampleSpread = this.cfg.groundSampleSpread || 0;
+
     // feet position: snap onto the surface beneath the current camera
     const up = camera.position.clone().normalize();
     if (!isFinite(up.x) || up.lengthSq() < 0.5) up.set(0, 1, 0);
-    const r = this.sampler.surfaceRadius(up.x, up.y, up.z);
+    const r = this._groundRadius(up.x, up.y, up.z);
     this.pos = up.clone().multiplyScalar(r);
     this.vel = new THREE.Vector3();
     this.up = up.clone();
@@ -98,6 +103,45 @@ export class PlanetController {
   get isLocked() { return this._locked; }
   get keys() { return this._keys; }
 
+  /**
+   * Facet-aware ground radius along a (near-unit) direction. The planet mesh is
+   * flat-shaded over ~quad-size triangles, so the true rendered surface under
+   * the player is the triangle plane, which can rise above the height sampled
+   * exactly at the player's direction. A flat triangle never exceeds its
+   * highest vertex, so we sample the surface across a quad-sized neighbourhood
+   * and take the max — this keeps the body (and camera) on top of the faceted
+   * mesh instead of clipping below it.
+   */
+  _groundRadius(ux, uy, uz) {
+    const s = this.sampler;
+    let r = s.surfaceRadius(ux, uy, uz);
+    const spread = this.groundSampleSpread;
+    if (spread <= 0) return r;
+
+    const len = Math.hypot(ux, uy, uz) || 1;
+    ux /= len; uy /= len; uz /= len;
+    // tangent basis around the up direction
+    const ax = Math.abs(uy) < 0.99 ? 0 : 1;
+    const ay = Math.abs(uy) < 0.99 ? 1 : 0;
+    let t1x = ay * uz, t1y = -ax * uz, t1z = ax * uy - ay * ux;
+    const l1 = Math.hypot(t1x, t1y, t1z) || 1; t1x /= l1; t1y /= l1; t1z /= l1;
+    const t2x = uy * t1z - uz * t1y, t2y = uz * t1x - ux * t1z, t2z = ux * t1y - uy * t1x;
+
+    const planetR = s.u.uPlanetRadius.value || this.pos?.length() || 1;
+    const eps = spread / planetR;
+    // 8 neighbours (axes + diagonals) cover whichever triangle holds the player
+    const dirs = [
+      [t1x, t1y, t1z], [-t1x, -t1y, -t1z], [t2x, t2y, t2z], [-t2x, -t2y, -t2z],
+      [t1x + t2x, t1y + t2y, t1z + t2z], [t1x - t2x, t1y - t2y, t1z - t2z],
+      [-t1x + t2x, -t1y + t2y, -t1z + t2z], [-t1x - t2x, -t1y - t2y, -t1z - t2z],
+    ];
+    for (const [dx, dy, dz] of dirs) {
+      const nr = s.surfaceRadius(ux + dx * eps, uy + dy * eps, uz + dz * eps);
+      if (nr > r) r = nr;
+    }
+    return r;
+  }
+
   _initForward() {
     // pick a world axis not parallel to up, project onto the tangent plane
     const ref = Math.abs(this.up.y) < 0.95
@@ -146,7 +190,7 @@ export class PlanetController {
     this._jumpHeld = jumpKey;
 
     // --- ground + grounded test ---
-    const rGround = this.sampler.surfaceRadius(this.up.x, this.up.y, this.up.z);
+    const rGround = this._groundRadius(this.up.x, this.up.y, this.up.z);
     const altitude = this.pos.length() - rGround;
     const grounded = altitude <= 0.05 && this.vel.dot(this.up) <= 0.5;
     if (grounded) this._coyote = cfg.coyoteTime;
@@ -193,7 +237,7 @@ export class PlanetController {
 
     // --- collide with the surface at the new position ---
     this.up.copy(this.pos).normalize();
-    const rNow = this.sampler.surfaceRadius(this.up.x, this.up.y, this.up.z);
+    const rNow = this._groundRadius(this.up.x, this.up.y, this.up.z);
     const lenNow = this.pos.length();
     if (lenNow <= rNow) {
       this.pos.copy(this.up).multiplyScalar(rNow);
@@ -207,7 +251,7 @@ export class PlanetController {
     }
 
     // --- state ---
-    const alt2 = this.pos.length() - this.sampler.surfaceRadius(this.up.x, this.up.y, this.up.z);
+    const alt2 = this.pos.length() - this._groundRadius(this.up.x, this.up.y, this.up.z);
     this.state = alt2 <= 0.05 ? 'grounded' : (this.vel.dot(this.up) < 0 ? 'falling' : 'jumping');
 
     this._syncCamera();

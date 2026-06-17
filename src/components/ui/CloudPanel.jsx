@@ -1,4 +1,6 @@
+import { useContext } from 'react';
 import ControlSection from './ControlSection.jsx';
+import { FlatPanelContext } from '../panels/PanelContext.js';
 import { SliderCtl, ToggleRow, SelectRow, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
 import { CLOUD_DEFAULT_PARAMS, CLOUD_NOISE_VARIANTS, matchCloudQualityName } from '../../engine/sky/CloudSettings.js';
@@ -60,6 +62,7 @@ function val(params, key) {
 }
 
 export default function CloudPanel({ params, onParam, perf, onPerfSetting, onCloudQuality, worldMode, id = 'inspector-clouds', defaultOpen = false }) {
+  const flat = useContext(FlatPanelContext);
   const enabled = !!params.cloudsEnabled;
   const distInfo = worldMode === 'planet'
     ? 'Hide clouds when the camera is farther than this many planet radii.'
@@ -69,28 +72,13 @@ export default function CloudPanel({ params, onParam, perf, onPerfSetting, onClo
   const p = perf ?? {};
   const qualityName = perf ? matchCloudQualityName(perf) : 'high';
 
-  return (
-    <ControlSection
-      id={id}
-      title="CLOUDS"
-      defaultOpen={defaultOpen}
-      statusDot={enabled ? 'active' : null}
-      icon={(
-        <svg viewBox="0 0 16 16" fill="none">
-          <path d="M4 11.5a2.5 2.5 0 0 1 .4-4.95A3.5 3.5 0 0 1 11.3 6.6a2.5 2.5 0 0 1-.3 4.9H4z" stroke="currentColor" strokeWidth="1.1" />
-        </svg>
-      )}
-    >
+  const content = (
+    <>
       <ToggleRow
         label="Enable Clouds"
         value={enabled}
         onChange={(v) => onParam('cloudsEnabled', v)}
         info="Show the volumetric cloud shell around the planet (planet mode)."
-        icon={(
-          <svg viewBox="0 0 16 16" fill="none">
-            <path d="M4 11.5a2.5 2.5 0 0 1 .4-4.95A3.5 3.5 0 0 1 11.3 6.6a2.5 2.5 0 0 1-.3 4.9H4z" stroke="currentColor" strokeWidth="1.1" />
-          </svg>
-        )}
       />
 
       {enabled && (
@@ -166,6 +154,24 @@ export default function CloudPanel({ params, onParam, perf, onPerfSetting, onClo
           />
         </>
       )}
+    </>
+  );
+
+  if (flat) return content;
+
+  return (
+    <ControlSection
+      id={id}
+      title="CLOUDS"
+      defaultOpen={defaultOpen}
+      statusDot={enabled ? 'active' : null}
+      icon={(
+        <svg viewBox="0 0 16 16" fill="none">
+          <path d="M4 11.5a2.5 2.5 0 0 1 .4-4.95A3.5 3.5 0 0 1 11.3 6.6a2.5 2.5 0 0 1-.3 4.9H4z" stroke="currentColor" strokeWidth="1.1" />
+        </svg>
+      )}
+    >
+      {content}
     </ControlSection>
   );
 }

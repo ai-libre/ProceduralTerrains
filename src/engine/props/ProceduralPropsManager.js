@@ -65,13 +65,105 @@ function makeGrassTuftGeometry({ bladeCount = 14, segments = 4, height = 1, radi
   return geo;
 }
 
-function makeFlowerGeometry() {
+// A few flower "species" — each builds a proper stem + radial petals + center.
+// Geometry base sits at y = 0 so instances anchor cleanly on the terrain.
+function makeFlowerKinds() {
+  return [
+    { // daisy — many slim white petals, yellow disk
+      stemHeight: 0.95, stemWidth: 0.022, leafLen: 0.26,
+      petalCount: 12, petalLen: 0.30, petalWidth: 0.05, tilt: 0.22,
+      petalColor: 0xf3f1e8, centerColor: 0xf2c044, centerRadius: 0.11,
+    },
+    { // poppy — few broad red petals, dark cup
+      stemHeight: 0.82, stemWidth: 0.024, leafLen: 0.22,
+      petalCount: 5, petalLen: 0.34, petalWidth: 0.17, tilt: 0.55,
+      petalColor: 0xd83a30, centerColor: 0x241f18, centerRadius: 0.09,
+    },
+    { // cornflower — blue/violet star
+      stemHeight: 0.90, stemWidth: 0.020, leafLen: 0.24,
+      petalCount: 7, petalLen: 0.30, petalWidth: 0.08, tilt: 0.40,
+      petalColor: 0x6a78d8, centerColor: 0x3a3f73, centerRadius: 0.07,
+    },
+    { // buttercup — bright yellow cup
+      stemHeight: 0.70, stemWidth: 0.022, leafLen: 0.20,
+      petalCount: 5, petalLen: 0.26, petalWidth: 0.15, tilt: 0.45,
+      petalColor: 0xf4c224, centerColor: 0xe6951f, centerRadius: 0.07,
+    },
+    { // pink aster — medium petals
+      stemHeight: 0.88, stemWidth: 0.020, leafLen: 0.24,
+      petalCount: 9, petalLen: 0.28, petalWidth: 0.06, tilt: 0.30,
+      petalColor: 0xe46fa6, centerColor: 0xf2d24b, centerRadius: 0.08,
+    },
+  ];
+}
+
+function makeFlowerGeometry(kind) {
+  const positions = [];
+  const colors = [];
+  const indices = [];
+
+  const addTri = (a, b, c, col) => {
+    const i = positions.length / 3;
+    positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+    for (let k = 0; k < 3; k++) colors.push(col.r, col.g, col.b);
+    indices.push(i, i + 1, i + 2);
+  };
+  const addQuad = (a, b, c, d, col) => { addTri(a, b, c, col); addTri(a, c, d, col); };
+
+  const stemColor = new THREE.Color(0x3c7d2e);
+  const leafColor = new THREE.Color(0x4f9d42);
+  const petalColor = new THREE.Color(kind.petalColor);
+  const centerColor = new THREE.Color(kind.centerColor);
+
+  const sh = kind.stemHeight;
+  const sw = kind.stemWidth;
+
+  // Stem: two crossed tapered quads so it reads from any angle.
+  addQuad([-sw, 0, 0], [sw, 0, 0], [sw * 0.5, sh, 0], [-sw * 0.5, sh, 0], stemColor);
+  addQuad([0, 0, -sw], [0, 0, sw], [0, sh, sw * 0.5], [0, sh, -sw * 0.5], stemColor);
+
+  // A single leaf partway up the stem.
+  const ll = kind.leafLen;
+  addTri([0, sh * 0.38, 0], [ll, sh * 0.46, ll * 0.35], [ll * 0.25, sh * 0.62, 0], leafColor);
+
+  // Petals radiating from the top of the stem.
+  const cx = 0, cy = sh, cz = 0;
+  const n = kind.petalCount;
+  const pl = kind.petalLen;
+  const pw = kind.petalWidth;
+  const tilt = kind.tilt;
+  for (let p = 0; p < n; p++) {
+    const ang = (p / n) * Math.PI * 2;
+    const dx = Math.cos(ang), dz = Math.sin(ang);
+    const sx = Math.cos(ang + Math.PI / 2), sz = Math.sin(ang + Math.PI / 2);
+    const mid = [cx + dx * pl * 0.5, cy + tilt * pl * 0.55, cz + dz * pl * 0.5];
+    const tip = [cx + dx * pl, cy + tilt * pl, cz + dz * pl];
+    const center = [cx, cy, cz];
+    const left = [mid[0] + sx * pw, mid[1], mid[2] + sz * pw];
+    const right = [mid[0] - sx * pw, mid[1], mid[2] - sz * pw];
+    addTri(center, left, tip, petalColor);
+    addTri(center, tip, right, petalColor);
+  }
+
+  // Center disk.
+  const cr = kind.centerRadius;
+  const seg = 7;
+  const top = cy + tilt * 0.04 + 0.02;
+  for (let s = 0; s < seg; s++) {
+    const a0 = (s / seg) * Math.PI * 2;
+    const a1 = ((s + 1) / seg) * Math.PI * 2;
+    addTri(
+      [cx, top, cz],
+      [cx + Math.cos(a0) * cr, top, cz + Math.sin(a0) * cr],
+      [cx + Math.cos(a1) * cr, top, cz + Math.sin(a1) * cr],
+      centerColor,
+    );
+  }
+
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute([
-    -0.18, 0.55, 0, 0.18, 0.55, 0, 0, 0.92, 0,
-    0, 0.55, -0.18, 0, 0.55, 0.18, 0, 0.92, 0,
-  ], 3));
-  geo.setIndex([0, 1, 2, 3, 4, 5]);
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setIndex(indices);
   geo.computeVertexNormals();
   return geo;
 }
@@ -85,10 +177,11 @@ export class ProceduralPropsManager {
 
     this.grassNearGeometry = makeGrassTuftGeometry({ bladeCount: 16, segments: 4, height: 1.0, radius: 0.26 });
     this.grassMidGeometry = makeGrassTuftGeometry({ bladeCount: 7, segments: 2, height: 0.86, radius: 0.32 });
-    this.flowerGeometry = makeFlowerGeometry();
+    this.flowerKinds = makeFlowerKinds();
+    this.flowerGeometries = this.flowerKinds.map((k) => makeFlowerGeometry(k));
     this.grassNearMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
     this.grassMidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
-    this.flowerMaterial = new THREE.MeshLambertMaterial({ color: 0xf2d46b, side: THREE.DoubleSide });
+    this.flowerMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
 
     this.meshes = [];
     this._lastKey = '';
@@ -189,8 +282,12 @@ export class ProceduralPropsManager {
         const flowerWeight = clamp((paint?.flowers ?? 0) + (paint?.mixed ?? 0) * 0.5 + params.propsFlowers * 0.35, 0, 1);
         const isFlower = hashInt(gx + 7, gz + 19, params.seed) < flowerWeight;
         const scale = lerp(4.0, 8.5, hashInt(gx + 29, gz + 11, params.seed)) * (isFlower ? 0.78 : params.propsGrass);
-        const item = { pos: [x, y + 0.6, z], normal: [n.x, n.y, n.z], yaw: h0 * Math.PI * 2, scale };
-        if (isFlower) flowers.push(item);
+        // Anchor on the ground: geometry base is at y=0. The render mesh is
+        // faceted/LOD-reduced, so the smooth height we sample sits above the
+        // triangles on crests — bury the base enough to absorb that gap.
+        const sink = scale * 0.16 + 0.4;
+        const item = { pos: [x, y - sink, z], normal: [n.x, n.y, n.z], yaw: h0 * Math.PI * 2, scale };
+        if (isFlower) { item.variant = Math.floor(hashInt(gx + 3, gz + 41, params.seed) * this.flowerGeometries.length); flowers.push(item); }
         else if (dist < params.propsLodDistance) grassNear.push(item);
         else grassMid.push(item);
       }
@@ -235,16 +332,18 @@ export class ProceduralPropsManager {
         const n = planetSampler.normalAt(dir.x, dir.y, dir.z);
         const slope = n.x * dir.x + n.y * dir.y + n.z * dir.z;
         if (slope < 0.78) continue;
-        const surfaceRadius = params.planetRadius + height + 0.8;
         const isFlower = hashInt(gx + 7, gy + 19, params.seed) < clamp(params.propsFlowers * 0.38, 0, 1);
         const scale = lerp(5.0, 10.0, hashInt(gx + 29, gy + 11, params.seed)) * (isFlower ? 0.78 : params.propsGrass);
+        // Anchor on the surface: sink the base along the normal so it tucks
+        // into the ground rather than floating above the faceted mesh.
+        const surfaceRadius = params.planetRadius + height - (scale * 0.16 + 0.4);
         const item = {
           pos: [dir.x * surfaceRadius, dir.y * surfaceRadius, dir.z * surfaceRadius],
           normal: [n.x, n.y, n.z],
           yaw: h0 * Math.PI * 2,
           scale,
         };
-        if (isFlower) flowers.push(item);
+        if (isFlower) { item.variant = Math.floor(hashInt(gx + 3, gy + 41, params.seed) * this.flowerGeometries.length); flowers.push(item); }
         else if (dist < params.propsLodDistance) grassNear.push(item);
         else grassMid.push(item);
       }
@@ -257,7 +356,15 @@ export class ProceduralPropsManager {
     this._clearMeshes();
     this._addInstanced('grass-near', this.grassNearGeometry, this.grassNearMaterial, grassNear);
     this._addInstanced('grass-mid', this.grassMidGeometry, this.grassMidMaterial, grassMid);
-    this._addInstanced('flowers', this.flowerGeometry, this.flowerMaterial, flowers);
+    // Group flowers by species so each variant gets its own instanced mesh.
+    const byVariant = [];
+    for (const f of flowers) {
+      const v = f.variant || 0;
+      (byVariant[v] || (byVariant[v] = [])).push(f);
+    }
+    for (let v = 0; v < this.flowerGeometries.length; v++) {
+      if (byVariant[v]) this._addInstanced(`flowers-${v}`, this.flowerGeometries[v], this.flowerMaterial, byVariant[v]);
+    }
   }
 
   _addInstanced(name, geometry, material, items) {
@@ -286,7 +393,7 @@ export class ProceduralPropsManager {
     this.scene.remove(this.group);
     this.grassNearGeometry.dispose();
     this.grassMidGeometry.dispose();
-    this.flowerGeometry.dispose();
+    this.flowerGeometries.forEach((g) => g.dispose());
     this.grassNearMaterial.dispose();
     this.grassMidMaterial.dispose();
     this.flowerMaterial.dispose();

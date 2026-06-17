@@ -247,7 +247,6 @@ function CloudsPanel({ ctx }) {
         onPerfSetting={ctx.onPerfSetting}
         onCloudQuality={ctx.onCloudQuality}
         worldMode={ctx.worldMode}
-        defaultOpen
       />
     </SidePanel>
   );

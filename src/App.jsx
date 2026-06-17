@@ -286,9 +286,10 @@ export default function App() {
   const fpsView = isInfinite || planetWalking;
   const studioLike = isStudio || (isPlanet && !playerMode);
   const showStudioUI = !previewMode && !paintMode && studioLike;
+  const showToolPanels = !previewMode && !paintMode && !planetWalking;
 
   const togglePanel = (id) => setActivePanel((cur) => (cur === id ? null : id));
-  const effectivePanel = showStudioUI && panelAvailable(activePanel, worldMode) ? activePanel : null;
+  const effectivePanel = showToolPanels && panelAvailable(activePanel, worldMode) ? activePanel : null;
 
   const block = blockingTask(loading.tasks);
   const nonBlock = nonBlockingTask(loading.tasks);
@@ -343,7 +344,7 @@ export default function App() {
       />
 
       <div id="main" className="app-shell">
-        {showStudioUI && (
+        {showToolPanels && (
           <LeftToolbar activePanel={effectivePanel} worldMode={worldMode} onSelect={togglePanel} />
         )}
 
@@ -408,7 +409,7 @@ export default function App() {
           {block && <LoadingOverlay task={block} />}
         </div>
 
-        {showStudioUI && (
+        {showToolPanels && (
           <SideDrawer activePanel={effectivePanel} ctx={ctx} onClose={() => setActivePanel(null)} />
         )}
       </div>

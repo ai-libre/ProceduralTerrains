@@ -34,6 +34,7 @@ export const PANEL_META = {
   },
   biomes: { label: 'Biomes', title: 'Biomes', desc: 'Climate distribution and masks.', icon: ic(<><rect x="4" y="4" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="4" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="4" y="11" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="11" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /></>) },
   water: { label: 'Water', title: 'Water', desc: 'Ocean surface and colours.', icon: ic(<path d="M10 4c-2 3-5 5-5 8a5 5 0 0 0 10 0c0-3-3-5-5-8z" stroke="currentColor" strokeWidth="1.4" />) },
+  props: { label: 'Props', title: 'Props', desc: 'Procedural grass and flowers.', icon: ic(<path d="M5 16c.2-5 1.2-9 3-13M10 16c-.1-4.8.4-8.6 1.5-12M14 16c-.4-4.2-1.2-7.4-2.4-9.6" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />) },
   clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: ic(<path d="M5 14a3 3 0 0 1 .5-5.95A4.2 4.2 0 0 1 14 8.3a3 3 0 0 1-.4 5.7H5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />) },
   lighting: { label: 'Lighting', title: 'Lighting', desc: 'Sun, atmosphere and fog.', icon: ic(<><circle cx="10" cy="10" r="3" stroke="currentColor" strokeWidth="1.4" /><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M15.7 4.3l-1.8 1.8M6.1 13.9l-1.8 1.8" stroke="currentColor" strokeWidth="1.3" /></>) },
   export: { label: 'Export', title: 'Export', desc: 'Export meshes and textures.', icon: ic(<><path d="M10 3v9M10 3 7 6M10 3l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /><path d="M4 12v4h12v-4" stroke="currentColor" strokeWidth="1.4" /></>) },
@@ -42,7 +43,7 @@ export const PANEL_META = {
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'biomes', 'water', 'clouds', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'biomes', 'water', 'props', 'clouds', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -194,6 +195,44 @@ function WaterPanel({ ctx }) {
           value={colorToHex(palette[key] ?? [0.05, 0.2, 0.35])}
           onChange={(e) => ctx.planetStyleProps.onColorChange(key, parseColor(e.target.value))} />
       ))}
+    </SidePanel>
+  );
+}
+
+const PROP_SLIDERS = {
+  propsDensity: { label: 'Density', min: 0, max: 2, step: 0.05, digits: 2 },
+  propsGrass: { label: 'Grass Scale', min: 0.2, max: 2, step: 0.05, digits: 2 },
+  propsFlowers: { label: 'Flower Mix', min: 0, max: 1, step: 0.01, digits: 2 },
+  propsCullDistance: { label: 'Cull Distance', min: 120, max: 1800, step: 20, digits: 0, unit: ' u' },
+  propsLodDistance: { label: 'LOD Distance', min: 60, max: 900, step: 10, digits: 0, unit: ' u' },
+};
+
+function PropsPanel({ ctx }) {
+  const { params, onParam, worldMode } = ctx;
+  const enabled = !!params.propsEnabled;
+  return (
+    <SidePanel title="Props" description="Procedural grass and flowers." onClose={ctx.onClose}>
+      <ToggleRow label="Procedural Props" value={enabled} onChange={(v) => onParam('propsEnabled', v)}
+        info="Scatter lightweight procedural grass and flowers on valid terrain in Tile, Infinite World, and Planet modes." />
+      {enabled && (
+        <>
+          <div className="subsection-label">Distribution</div>
+          <SliderCtl def={PROP_SLIDERS.propsDensity} value={params.propsDensity} onChange={(v) => onParam('propsDensity', v)} />
+          <SliderCtl def={PROP_SLIDERS.propsFlowers} value={params.propsFlowers} onChange={(v) => onParam('propsFlowers', v)} />
+
+          <div className="subsection-label">Look</div>
+          <SliderCtl def={PROP_SLIDERS.propsGrass} value={params.propsGrass} onChange={(v) => onParam('propsGrass', v)} />
+
+          <div className="subsection-label">Performance</div>
+          <SliderCtl def={PROP_SLIDERS.propsCullDistance} value={params.propsCullDistance} onChange={(v) => onParam('propsCullDistance', v)} />
+          <SliderCtl def={PROP_SLIDERS.propsLodDistance} value={params.propsLodDistance} onChange={(v) => onParam('propsLodDistance', v)} />
+          <p className="section-hint">
+            {worldMode === 'studio'
+              ? 'Studio also reads the props mask painted in Paint Mode.'
+              : 'This mode uses deterministic procedural scattering from the current seed.'}
+          </p>
+        </>
+      )}
     </SidePanel>
   );
 }
@@ -367,7 +406,7 @@ function ExportPanel({ ctx }) {
 
 const COMPONENTS = {
   terrain: TerrainPanel, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
-  water: WaterPanel, clouds: CloudsPanel, lighting: LightingPanel, export: ExportPanel,
+  water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
 };
 

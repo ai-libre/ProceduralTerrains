@@ -9,8 +9,15 @@ const DEFAULT_STATE = {
   brushSize: 90,
   strength: 0.35,
   falloff: 0.75,
+  brushShape: 'round',
+  brushRotation: 0,
+  brushScatter: 0.55,
+  brushSpacing: 0.35,
   targetHeight: 120,
+  riverDepth: 28,
+  riverBankSoftness: 0.65,
   biome: 'desert',
+  propType: 'mixed',
   layerOpacity: 1,
 };
 
@@ -34,6 +41,7 @@ export class PaintModeManager {
     this.hit = null;
     this.isPainting = false;
     this._lastStamp = 0;
+    this._lastPaintPoint = null;
 
     this._onPointerMove = this._onPointerMove.bind(this);
     this._onPointerDown = this._onPointerDown.bind(this);
@@ -78,6 +86,11 @@ export class PaintModeManager {
     this.state.brushSize = Math.max(4, Math.min(900, this.state.brushSize));
     this.state.strength = Math.max(0.01, Math.min(1, this.state.strength));
     this.state.falloff = Math.max(0, Math.min(1, this.state.falloff));
+    this.state.brushRotation = Math.max(-180, Math.min(180, this.state.brushRotation));
+    this.state.brushScatter = Math.max(0.05, Math.min(1, this.state.brushScatter));
+    this.state.brushSpacing = Math.max(0.08, Math.min(1, this.state.brushSpacing));
+    this.state.riverDepth = Math.max(1, Math.min(220, this.state.riverDepth));
+    this.state.riverBankSoftness = Math.max(0.05, Math.min(1, this.state.riverBankSoftness));
     this._syncUniforms();
     this._emit();
   }
@@ -92,7 +105,7 @@ export class PaintModeManager {
 
   update() {
     if (!this.state.enabled) return;
-    if (this.hit) this.cursor.update(this.hit, this.state.brushSize);
+    if (this.hit) this.cursor.update(this.hit, this.state.brushSize, this.state.brushShape, this.state.brushRotation);
     if (this.isPainting) this._stamp();
   }
 
@@ -117,10 +130,14 @@ export class PaintModeManager {
     this.domElement.setPointerCapture?.(e.pointerId);
     this._updateHit(e);
     this.isPainting = true;
+    this._lastPaintPoint = null;
     this._stamp(true);
   }
 
-  _onPointerUp() { this.isPainting = false; }
+  _onPointerUp() {
+    this.isPainting = false;
+    this._lastPaintPoint = null;
+  }
 
   _onWheel(e) {
     if (!this.state.enabled || !e.shiftKey) return;
@@ -136,7 +153,7 @@ export class PaintModeManager {
     this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
     this.hit = this._intersectHeightField(this.raycaster.ray);
-    this.cursor.update(this.hit, this.state.brushSize);
+    this.cursor.update(this.hit, this.state.brushSize, this.state.brushShape, this.state.brushRotation);
   }
 
   _heightAt(x, z, includePaint = true) {
@@ -178,18 +195,46 @@ export class PaintModeManager {
   _stamp(force = false) {
     if (!this.hit) return;
     const now = performance.now();
-    const minStampMs = this.state.tool === 'smooth' ? 80 : 24;
+    const minStampMs = this.state.tool === 'smooth' ? 45 : 16;
     if (!force && now - this._lastStamp < minStampMs) return;
     this._lastStamp = now;
+
+    const current = this.hit.clone();
+    if (force || !this._lastPaintPoint) {
+      this._stampAt(current);
+      this._lastPaintPoint = current;
+      return;
+    }
+
+    const spacing = Math.max(2, this.state.brushSize * this.state.brushSpacing);
+    const dist = this._lastPaintPoint.distanceTo(current);
+    if (dist < spacing) return;
+
+    const steps = Math.min(64, Math.floor(dist / spacing));
+    const start = this._lastPaintPoint.clone();
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      this._stampAt(start.clone().lerp(current, t));
+    }
+    this._lastPaintPoint = current;
+  }
+
+  _stampAt(point) {
     this.layers.stamp({
-      x: this.hit.x,
-      z: this.hit.z,
+      x: point.x,
+      z: point.z,
       radius: this.state.brushSize,
       strength: this.state.strength,
       falloff: this.state.falloff,
       tool: this.state.tool,
       targetHeight: this.state.targetHeight,
       biome: this.state.biome,
+      propType: this.state.propType,
+      brushShape: this.state.brushShape,
+      brushRotation: THREE.MathUtils.degToRad(this.state.brushRotation),
+      brushScatter: this.state.brushScatter,
+      riverDepth: this.state.riverDepth,
+      riverBankSoftness: this.state.riverBankSoftness,
       baseHeightAt: (x, z) => this._heightAt(x, z, false) ?? 0,
     });
   }

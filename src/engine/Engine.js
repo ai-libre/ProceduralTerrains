@@ -34,6 +34,7 @@ import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
 import { PlayerController } from './player/PlayerController.js';
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 import { PaintModeManager } from '../paint/PaintModeManager.js';
+import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 
 // ============================================================================
 // Terrain Studio engine. Framework-agnostic: owns the renderer/scene, the
@@ -108,6 +109,8 @@ export class Engine {
     this.planetStyle = new PlanetStyleManager();
     this.paintMode = null;
     this.paintState = null;
+    this.propsManager = null;
+    this.propsTerrainSampler = null;
 
     // World mode: 'studio' (single board), 'infinite' (streamed flat grid),
     // or 'planet' (cube-sphere world)
@@ -153,6 +156,7 @@ export class Engine {
     this._initScene(minimapBase, minimapOverlay);
     this._initControls();
     this._initPaintMode();
+    this._initProps();
 
     this.controls.setBoardSize(this.boardSize);
     this.controls.reset(this.boardSize);
@@ -290,6 +294,10 @@ export class Engine {
       onToast: (msg) => this.cb.onToast(msg),
     });
     this.paintState = { ...this.paintMode.state };
+  }
+
+  _initProps() {
+    this.propsManager = new ProceduralPropsManager(this.scene);
   }
 
   // ------------------------------------------------------------ parameters
@@ -1270,6 +1278,33 @@ export class Engine {
     }
   }
 
+  _getPropsTerrainSampler() {
+    if (!this.propsTerrainSampler) {
+      const cpu = new TerrainHeightSampler(this.uniforms, () => ({
+        octaves: Math.round(this.params.octaves),
+        infinite: this.worldMode === 'infinite',
+      }));
+      const heightAt = (x, z) => {
+        const base = cpu.heightAt(x, z);
+        if (this.worldMode !== 'studio') return base;
+        return base + (this.paintMode?.layers?.sampleHeightOffset(x, z) ?? 0) * (this.paintMode?.state?.layerOpacity ?? 1);
+      };
+      this.propsTerrainSampler = {
+        heightAt,
+        normalAt: (x, z, eps = 2) => {
+          const hL = heightAt(x - eps, z);
+          const hR = heightAt(x + eps, z);
+          const hD = heightAt(x, z - eps);
+          const hU = heightAt(x, z + eps);
+          const nx = hL - hR, ny = 2 * eps, nz = hD - hU;
+          const len = Math.hypot(nx, ny, nz) || 1;
+          return { x: nx / len, y: ny / len, z: nz / len };
+        },
+      };
+    }
+    return this.propsTerrainSampler;
+  }
+
   /** Size + show/hide the water shell from the current radius + sea level. */
   _updatePlanetWater() {
     if (!this.planetWater) return;
@@ -1766,6 +1801,15 @@ export class Engine {
     );
 
     this.paintMode?.update(dt);
+    this.propsManager?.update({
+      mode: this.worldMode,
+      camera: this.camera,
+      params: this.params,
+      boardSize: this.boardSize,
+      heightSampler: this._getPropsTerrainSampler(),
+      planetSampler: this.worldMode === 'planet' ? this._getPlanetSampler() : null,
+      paintLayers: this.worldMode === 'studio' ? this.paintMode?.layers : null,
+    });
 
     if (this.worldMode === 'infinite') {
       this._tickInfinite(dt, now);
@@ -1979,6 +2023,7 @@ export class Engine {
     if (this._onVisibility) document.removeEventListener('visibilitychange', this._onVisibility);
     this.renderer.setAnimationLoop(null);
     if (this.paintMode) { this.paintMode.dispose(); this.paintMode = null; }
+    if (this.propsManager) { this.propsManager.dispose(); this.propsManager = null; }
     if (this.player) { this.player.dispose(); this.player = null; }
     if (this.heightSampler) { this.heightSampler.dispose(); this.heightSampler = null; }
     if (this.worldMode === 'infinite') this._disposeInfinite();

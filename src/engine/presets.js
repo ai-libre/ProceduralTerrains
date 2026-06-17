@@ -56,6 +56,14 @@ export const DEFAULT_PARAMS = {
   waterAnim: true,
   pixelRatio: 0,           // 0 = auto (device)
 
+  // procedural ground props
+  propsEnabled: false,
+  propsDensity: 0.65,
+  propsFlowers: 0.28,
+  propsGrass: 1.0,
+  propsCullDistance: 760,
+  propsLodDistance: 280,
+
   // planet style (color layer — live shader updates, no rebuild)
   planetPreset: 'earth',
   palettePreset: 'earth',

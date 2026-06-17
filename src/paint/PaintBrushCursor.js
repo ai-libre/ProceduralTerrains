@@ -25,10 +25,24 @@ export class PaintBrushCursor {
 
   setVisible(visible) { this.group.visible = !!visible; }
 
-  update(point, radius) {
+  update(point, radius, shape = 'round', rotationDeg = 0) {
     if (!point) return this.setVisible(false);
     this.group.position.set(point.x, point.y + 2, point.z);
-    this.group.scale.setScalar(Math.max(1, radius));
+    const r = Math.max(1, radius);
+    let sx = r;
+    let sz = r;
+    if (shape === 'ellipse') {
+      sx = r * 1.65;
+      sz = r * 0.84;
+    } else if (shape === 'ribbon') {
+      sx = r * 2.4;
+      sz = r * 0.74;
+    } else if (shape === 'scatter') {
+      sx = r * 1.1;
+      sz = r * 1.1;
+    }
+    this.group.scale.set(sx, 1, sz);
+    this.group.rotation.y = THREE.MathUtils.degToRad(rotationDeg);
     this.setVisible(true);
   }
 

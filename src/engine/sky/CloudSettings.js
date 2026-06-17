@@ -12,6 +12,13 @@
 // Default cloud parameters (flat keys, `cloud*` namespace to avoid collisions
 // with the terrain params). Colors are arrays so they round-trip through the
 // JSON save/load type check (typeof [] === 'object').
+//
+// IMPORTANT: only *appearance / shape* knobs live here (they serialize with a
+// planet save). All cloud *quality / performance* knobs — raymarch steps,
+// self-shadowing, fallback mode, max distance — live in the centralized
+// PerformanceSettings (`perf.cloud*`) so there is a single source of truth and
+// the Performance tab and the Clouds panel can never disagree. See
+// CLOUD_LEGACY_PERF_KEYS below for migration of old saves.
 export const CLOUD_DEFAULT_PARAMS = {
   cloudsEnabled: false,
 
@@ -43,13 +50,13 @@ export const CLOUD_DEFAULT_PARAMS = {
   cloudScatteringStrength: 1.0,
   cloudColor: [1.0, 1.0, 1.0],
   cloudShadowColor: [0.42, 0.47, 0.60],
-
-  // performance
-  cloudQuality: 'high',       // low | medium | high | ultra
-  cloudSelfShadow: true,      // sun-direction secondary march (soft shading)
-  cloudMaxDistance: 6.0,      // hide clouds past this × planetRadius
-  cloudFallback: 'none',      // none | lite | off (safe modes for weak GPUs)
 };
+
+// Legacy quality/perf keys that used to live in params. Old saves may still
+// carry them; loadSeedJSON ports them into `perf` once (see Engine).
+export const CLOUD_LEGACY_PERF_KEYS = [
+  'cloudSelfShadow', 'cloudMaxDistance', 'cloudFallback', 'cloudQuality',
+];
 
 export const CLOUD_NOISE_VARIANTS = [
   { value: 'soft', label: 'Soft', index: 0 },
@@ -82,13 +89,17 @@ export const CLOUD_FALLBACK_MODES = {
 };
 
 /**
- * Resolve the effective step counts + self-shadow flag from the chosen quality
- * preset and fallback mode. Pure function — no THREE dependency.
- * @param {object} params engine params (or any object with the cloud* keys)
+ * Resolve the effective step counts + self-shadow flag from the centralized
+ * performance settings. Pure function — no THREE dependency.
+ *
+ * `config` is the merged `{ ...params, ...perf }` object; the quality keys
+ * (cloudSteps/cloudLightSteps/cloudOctaves/cloudDetailOctaves/cloudUseErosion/
+ * cloudSelfShadow/cloudFallback) come from `perf`, the single source of truth.
+ * Defaults guard any caller that hasn't merged perf yet (e.g. early warmup).
  * @returns {{steps:number, lightSteps:number, octaves:number, detailOctaves:number, useErosion:boolean, selfShadow:boolean, disabled:boolean}}
  */
-export function resolveCloudQuality(params) {
-  const fallback = params.cloudFallback || 'none';
+export function resolveCloudQuality(config) {
+  const fallback = config.cloudFallback || 'none';
   const fb = CLOUD_FALLBACK_MODES[fallback] || CLOUD_FALLBACK_MODES.none;
   if (fb.disabled) {
     return {
@@ -102,31 +113,15 @@ export function resolveCloudQuality(params) {
     };
   }
 
-  let steps = 64;
-  let lightSteps = 6;
-  let octaves = 5;
-  let detailOctaves = 4;
-  let useErosion = true;
-
-  if ('cloudSteps' in params) {
-    steps = params.cloudSteps;
-    lightSteps = params.cloudLightSteps;
-    octaves = params.cloudOctaves;
-    detailOctaves = params.cloudDetailOctaves;
-    useErosion = !!params.cloudUseErosion;
-  } else {
-    // legacy/params fallback
-    const preset = CLOUD_QUALITY_PRESETS[params.cloudQuality] || CLOUD_QUALITY_PRESETS.high;
-    steps = preset.steps;
-    lightSteps = preset.lightSteps;
-    octaves = preset.octaves ?? 5;
-    detailOctaves = preset.detailOctaves ?? 4;
-    useErosion = params.cloudUseErosion ?? preset.useErosion;
-  }
+  let steps = config.cloudSteps ?? 64;
+  let lightSteps = config.cloudLightSteps ?? 6;
+  const octaves = config.cloudOctaves ?? 5;
+  const detailOctaves = config.cloudDetailOctaves ?? 4;
+  const useErosion = config.cloudUseErosion !== false;
 
   steps = Math.max(8, Math.min(steps, fb.maxSteps));
   lightSteps = Math.max(1, Math.min(lightSteps, fb.allowSelfShadow ? lightSteps : 1));
-  const selfShadow = !!params.cloudSelfShadow && fb.allowSelfShadow;
+  const selfShadow = config.cloudSelfShadow !== false && fb.allowSelfShadow;
 
   return {
     steps,
@@ -137,4 +132,23 @@ export function resolveCloudQuality(params) {
     selfShadow,
     disabled: false
   };
+}
+
+/**
+ * Reverse-map the current perf step values to a named quality tier (low/medium/
+ * high/ultra) for display, or 'custom' if they don't match a preset exactly.
+ * @param {object} perf centralized performance settings
+ * @returns {string}
+ */
+export function matchCloudQualityName(perf) {
+  for (const [name, p] of Object.entries(CLOUD_QUALITY_PRESETS)) {
+    if (perf.cloudSteps === p.steps &&
+        perf.cloudLightSteps === p.lightSteps &&
+        perf.cloudOctaves === p.octaves &&
+        perf.cloudDetailOctaves === p.detailOctaves &&
+        (perf.cloudUseErosion !== false) === p.useErosion) {
+      return name;
+    }
+  }
+  return 'custom';
 }

@@ -2,6 +2,13 @@ import * as THREE from 'three';
 import { createCloudMaterial } from './CloudVolumeShader.js';
 import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
 
+// The cloud altitude/thickness defaults (and the slider ranges) were tuned for
+// the default planet radius. They're world-unit offsets, so on a much smaller
+// planet they'd dominate and the cloud shell would balloon far above the
+// surface (looking like a second, larger planet). Scale them by the radius
+// ratio so the shell stays proportional at any planet size.
+const REFERENCE_PLANET_RADIUS = 16000;
+
 // ============================================================================
 // PlanetCloudLayer: planet-side manager for the volumetric cloud shell. Owns
 // one sphere mesh (sized to the OUTER cloud radius) + the cloud material, and
@@ -77,8 +84,10 @@ export class PlanetCloudLayer {
 
     const u = this.material.uniforms;
     const r = this.planetRadius;
-    const inner = r + (params.cloudAltitude ?? 240);
-    const outer = inner + Math.max(20, params.cloudThickness ?? 620);
+    // keep the shell proportional to planet size (see REFERENCE_PLANET_RADIUS)
+    const radiusScale = r / REFERENCE_PLANET_RADIUS;
+    const inner = r + (params.cloudAltitude ?? 240) * radiusScale;
+    const outer = inner + Math.max(20, (params.cloudThickness ?? 620) * radiusScale);
     u.uCloudInner.value = inner;
     u.uCloudOuter.value = outer;
 

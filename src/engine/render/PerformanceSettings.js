@@ -52,6 +52,7 @@ export const PERF_LIMITS = {
 export const PERF_PRESETS = {
   performance: {
     label: 'Performance',
+    onDemandStudio: true,
     renderScale: 0.65, resolutionScale: 0.5, lodDistanceScale: 0.5,
     viewRadius: 6, maxCreatesPerFrame: 4, triangleBudget: 500_000,
     cullingAggressiveness: 1.5,
@@ -63,6 +64,7 @@ export const PERF_PRESETS = {
   },
   balanced: {
     label: 'Balanced',
+    onDemandStudio: true,
     renderScale: 0.8, resolutionScale: 0.75, lodDistanceScale: 0.75,
     viewRadius: 10, maxCreatesPerFrame: 6, triangleBudget: 900_000,
     cullingAggressiveness: 1.2,
@@ -74,6 +76,7 @@ export const PERF_PRESETS = {
   },
   high: {
     label: 'High',
+    onDemandStudio: false,
     renderScale: 1.0, resolutionScale: 1.0, lodDistanceScale: 1.0,
     viewRadius: 12, maxCreatesPerFrame: 8, triangleBudget: 1_600_000,
     cullingAggressiveness: 1.0,
@@ -85,6 +88,7 @@ export const PERF_PRESETS = {
   },
   ultra: {
     label: 'Ultra',
+    onDemandStudio: false,
     renderScale: 1.0, resolutionScale: 1.25, lodDistanceScale: 1.4,
     viewRadius: 16, maxCreatesPerFrame: 12, triangleBudget: 2_600_000,
     cullingAggressiveness: 0.8,
@@ -206,6 +210,8 @@ export function sanitizePerfSettings(settings) {
   s.autoPerf = !!s.autoPerf;
   // underwater camera effect — only costs anything while submerged
   s.underwaterEffect = s.underwaterEffect !== false;
+  // on-demand studio rendering — skip redraws when the studio scene is static
+  s.onDemandStudio = !!s.onDemandStudio;
 
   s.cloudSteps = Math.round(clamp(+s.cloudSteps || 64, PERF_LIMITS.cloudSteps));
   s.cloudLightSteps = Math.round(clamp(+s.cloudLightSteps || 6, PERF_LIMITS.cloudLightSteps));
@@ -245,6 +251,13 @@ export function sanitizePerfSettings(settings) {
 }
 
 // ------------------------------------------------------------- persistence
+
+/** True if the user already has persisted perf settings (i.e. not a first run).
+ *  Used to gate one-time GPU-tier auto-selection so we never override a
+ *  returning user's choices. */
+export function hasStoredPerfSettings() {
+  try { return localStorage.getItem(STORAGE_KEY) != null; } catch { return false; }
+}
 
 export function loadPerfSettings() {
   try {

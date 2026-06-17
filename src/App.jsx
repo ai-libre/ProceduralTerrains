@@ -128,16 +128,54 @@ export default function App() {
     engineRef.current = engine;
     setGpu(engine.gpuName);
     if (import.meta.env.DEV) window.terrainStudio = engine;
-    // safety: never leave the boot overlay stuck
+    // safety: never leave the boot overlay stuck, but do not reveal the canvas
+    // while the first studio frame is still being compiled/prepared.
     const bootTimer = setTimeout(() => {
-      if (!bootedRef.current) { bootedRef.current = true; loadingRef.current.done('boot'); }
-    }, 8000);
+      const e = engineRef.current;
+      if (!bootedRef.current && (!e || e._disposed || (!e._bootPending && !e._compiling))) {
+        bootedRef.current = true;
+        loadingRef.current.done('boot');
+      }
+    }, 30000);
     return () => { clearTimeout(bootTimer); engine.dispose(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pushToast]);
 
   const engine = () => engineRef.current;
-  const onParam = (key, value) => engine().setParam(key, value);
+
+  // Params that rebuild the whole world geometry (planet radius / surface
+  // detail, board chunk layout). The rebuild briefly freezes the main thread,
+  // so run it behind a blocking loading overlay with a yield first — the
+  // overlay paints, then the engine rebuilds, then we wait out any background
+  // shader compile (same pattern as a mode switch).
+  const HEAVY_PARAMS = new Set(['planetRadius', 'planetFaceGrid', 'chunkCount', 'chunkSize']);
+  const HEAVY_LABEL = {
+    planetRadius: 'Resizing planet…', planetFaceGrid: 'Rebuilding planet…',
+    chunkCount: 'Rebuilding board…', chunkSize: 'Rebuilding board…',
+  };
+  const onParam = (key, value) => {
+    const eng = engine();
+    if (!eng) return;
+    if (!HEAVY_PARAMS.has(key)) { eng.setParam(key, value); return; }
+    loading.run('param-rebuild', { blocking: true, label: HEAVY_LABEL[key] ?? 'Rebuilding…', detail: 'Generating new geometry…' }, async (update) => {
+      blockingUpdateRef.current = update;
+      eng.setParam(key, value);   // synchronous geometry rebuild (overlay already painted)
+      // wait out any background shader recompile the rebuild kicked off
+      await new Promise((resolve) => {
+        const startT = performance.now();
+        const tick = () => {
+          const e = engineRef.current;
+          if (!e || e._disposed) return resolve();
+          const elapsed = performance.now() - startT;
+          if (!e._compiling && elapsed > 80) return resolve();
+          if (elapsed > 30000) return resolve();   // safety net
+          setTimeout(tick, 80);
+        };
+        setTimeout(tick, 80);
+      });
+      blockingUpdateRef.current = null;
+    });
+  };
 
   const planetStyleProps = {
     planetStyle: params.planetStyle,
@@ -277,6 +315,7 @@ export default function App() {
     stats, gpu, perf,
     onPerfPreset: (key) => engine().setPerfPreset(key),
     onPerfSetting: (key, value) => engine().setPerfSetting(key, value),
+    onCloudQuality: (key) => engine().setCloudQuality(key),
     onPerfReset: () => engine().resetPerfSettings(),
     timeOfDay, onTimeOfDay: handleTimeOfDay,
     onExport, onExportScreenshot, onExportHeightmap,

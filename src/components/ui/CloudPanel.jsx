@@ -1,7 +1,7 @@
 import ControlSection from './ControlSection.jsx';
 import { SliderCtl, ToggleRow, SelectRow, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
-import { CLOUD_DEFAULT_PARAMS, CLOUD_NOISE_VARIANTS } from '../../engine/sky/CloudSettings.js';
+import { CLOUD_DEFAULT_PARAMS, CLOUD_NOISE_VARIANTS, matchCloudQualityName } from '../../engine/sky/CloudSettings.js';
 
 // Slider definitions grouped into labelled subsections. Keys map 1:1 to the
 // cloud* params in DEFAULT_PARAMS.
@@ -41,6 +41,7 @@ const QUALITY_OPTIONS = [
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
   { value: 'ultra', label: 'Ultra' },
+  { value: 'custom', label: 'Custom' },
 ];
 
 const FALLBACK_OPTIONS = [
@@ -58,11 +59,15 @@ function val(params, key) {
   return params[key] ?? CLOUD_DEFAULT_PARAMS[key];
 }
 
-export default function CloudPanel({ params, onParam, worldMode, id = 'inspector-clouds', defaultOpen = false }) {
+export default function CloudPanel({ params, onParam, perf, onPerfSetting, onCloudQuality, worldMode, id = 'inspector-clouds', defaultOpen = false }) {
   const enabled = !!params.cloudsEnabled;
   const distInfo = worldMode === 'planet'
     ? 'Hide clouds when the camera is farther than this many planet radii.'
     : 'Hide clouds when the camera is farther than this many board widths.';
+  // Quality / performance knobs are owned by the centralized perf settings —
+  // these read/write `perf` so the Performance tab and this panel stay in sync.
+  const p = perf ?? {};
+  const qualityName = perf ? matchCloudQualityName(perf) : 'high';
 
   return (
     <ControlSection
@@ -134,30 +139,30 @@ export default function CloudPanel({ params, onParam, worldMode, id = 'inspector
           ))}
           <ToggleRow
             label="Self Shadowing"
-            value={!!params.cloudSelfShadow}
-            onChange={(v) => onParam('cloudSelfShadow', v)}
-            info="Secondary sun-direction march for soft self-shadowing (costlier)."
+            value={p.cloudSelfShadow !== false}
+            onChange={(v) => onPerfSetting('cloudSelfShadow', v)}
+            info="Secondary sun-direction march for soft self-shadowing (costlier). Shared with Performance settings."
           />
 
           <div className="subsection-label">Performance</div>
           <SelectRow
             label="Quality"
-            value={params.cloudQuality}
+            value={qualityName}
             options={QUALITY_OPTIONS}
-            onChange={(v) => onParam('cloudQuality', v)}
-            info="Raymarch step count. Higher = smoother clouds, lower FPS."
+            onChange={(v) => v !== 'custom' && onCloudQuality(v)}
+            info="Raymarch step count. Higher = smoother clouds, lower FPS. Shared with Performance settings (fine-tune there)."
           />
           <SelectRow
             label="Fallback Mode"
-            value={params.cloudFallback}
+            value={p.cloudFallback ?? 'none'}
             options={FALLBACK_OPTIONS}
-            onChange={(v) => onParam('cloudFallback', v)}
+            onChange={(v) => onPerfSetting('cloudFallback', v)}
             info="Safe modes for weaker devices: Lite caps steps and disables self-shadowing; Off hides clouds."
           />
           <SliderCtl
             def={{ key: 'cloudMaxDistance', label: 'Max Distance', min: 1.5, max: 12, step: 0.5, digits: 1, unit: '×', info: distInfo }}
-            value={val(params, 'cloudMaxDistance')}
-            onChange={(v) => onParam('cloudMaxDistance', v)}
+            value={p.cloudMaxDistance ?? 6.0}
+            onChange={(v) => onPerfSetting('cloudMaxDistance', v)}
           />
         </>
       )}

@@ -201,7 +201,15 @@ function WaterPanel({ ctx }) {
 function CloudsPanel({ ctx }) {
   return (
     <SidePanel title="Clouds" description="Volumetric cloud layer." onClose={ctx.onClose}>
-      <CloudPanelInner params={ctx.params} onParam={ctx.onParam} worldMode={ctx.worldMode} defaultOpen />
+      <CloudPanelInner
+        params={ctx.params}
+        onParam={ctx.onParam}
+        perf={ctx.perf}
+        onPerfSetting={ctx.onPerfSetting}
+        onCloudQuality={ctx.onCloudQuality}
+        worldMode={ctx.worldMode}
+        defaultOpen
+      />
     </SidePanel>
   );
 }

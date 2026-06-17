@@ -204,6 +204,13 @@ function renderSettings({
         <ToggleRow label="Auto Performance Mode" value={perf.autoPerf} onChange={(v) => onPerfSetting('autoPerf', v)} />
       </SettingGroup>
 
+      <SettingGroup tab="overview" label="Pause When Idle" keywords="on demand static studio redraw idle battery heat power" {...groupProps}>
+        <ToggleRow label="Pause When Idle" value={perf.onDemandStudio} onChange={(v) => onPerfSetting('onDemandStudio', v)} />
+      </SettingGroup>
+
+      <SettingNote tab="overview" text="Pause When Idle stops redrawing the studio board when nothing moves — big GPU/battery/heat saving on weak machines." {...groupProps} />
+
+
       <SettingGroup tab="overview" label="Render Scale" keywords="resolution pixel dpr scale" {...groupProps}>
         <PerfSlider perf={perf} id="renderScale" onPerfSetting={onPerfSetting} />
       </SettingGroup>

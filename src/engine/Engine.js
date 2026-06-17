@@ -6,6 +6,7 @@ import { InfiniteWorld } from './terrain/InfiniteWorld.js';
 import { PlanetWorld } from './terrain/PlanetWorld.js';
 import { PlanetCloudLayer } from './sky/PlanetCloudLayer.js';
 import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
+import { CLOUD_QUALITY_PRESETS, CLOUD_LEGACY_PERF_KEYS } from './sky/CloudSettings.js';
 import { createPlanetMaterial, createPlanetWaterMaterial } from './terrain/PlanetMaterial.js';
 import { PlanetHeightSampler } from './terrain/PlanetHeightSampler.js';
 import { PlanetOrbitControls } from './PlanetOrbitControls.js';
@@ -21,7 +22,9 @@ import { UnderwaterEffect } from './render/UnderwaterEffect.js';
 import {
   applyPerfPreset, createPerfSettings, loadPerfSettings, savePerfSettings,
   sanitizePerfSettings, resolveLodSegments, resolveLodDistances,
+  hasStoredPerfSettings,
 } from './render/PerformanceSettings.js';
+import { detectGpuTier, presetForTier, saveGpuTier } from './render/GpuTier.js';
 import { TerrainExporter } from './terrain/TerrainExporter.js';
 import { PlanetExporter } from './terrain/PlanetExporter.js';
 import { buildBoardPlinthGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
@@ -84,8 +87,18 @@ export class Engine {
     this._frames = 0;
     this._fpsTime = 0;
     this._fps = 0;
+    // On-demand studio rendering: skip the scene draw when nothing changed
+    // (static camera, no animated layers). Saves GPU/heat on weak machines.
+    this._needsRender = true;
+    this._camPos = new THREE.Vector3();
+    this._camQuat = new THREE.Quaternion();
+    this._lastTris = 0;
+    this._lastDraws = 0;
+    this._lastRenderAt = 0;        // heartbeat: redraw at least ~1 Hz when idle
+    this._tickErrorLogged = false;
     this._clock = new THREE.Clock();
     this._disposed = false;
+    this._bootPending = true;
     // Async shader compilation state (KHR_parallel_shader_compile):
     // while > 0, ticks skip rendering so nothing forces a blocking link.
     this._compiling = 0;
@@ -127,21 +140,28 @@ export class Engine {
     this.timeOfDay = 0.38;         // default: morning
 
     // Centralized performance settings (persisted across sessions)
+    this._firstRun = !hasStoredPerfSettings();
     this.perf = loadPerfSettings();
     this.qualityPreset = this.perf.preset;
+    this.gpuTier = null;
+    this._tierNotice = null;
     this._autoScale = 1.0;         // automatic performance mode render scale
     this._autoCheckAt = 0;
 
     this._initRenderer();
+    this._autoSelectPresetByGpu();   // first run only: pick a preset for the GPU
     this._initScene(minimapBase, minimapOverlay);
     this._initControls();
     this._initPaintMode();
 
+    this.controls.setBoardSize(this.boardSize);
+    this.controls.reset(this.boardSize);
+    this.controls.update(1);
+    this.camera.updateMatrixWorld(true);
+
     this.applyAll({ force: true });
     this._applyPerformance();
-    this.controls.reset(this.boardSize);
     this._syncPlanetStyleToParams();
-    this.cb.onStatus('Ready', false);
     this.cb.onParams({ ...this.params });
     if (this.cb.onPerfChange) this.cb.onPerfChange({ ...this.perf });
 
@@ -149,10 +169,22 @@ export class Engine {
     this._resizeObserver.observe(canvas.parentElement);
     this._onResize();
 
+    // On returning to the tab, force one redraw (the static studio scene may
+    // have been cleared) and drop the accumulated hidden time.
+    this._onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        this._clock.getDelta();   // discard the long hidden gap
+        this._needsRender = true;
+      }
+    };
+    document.addEventListener('visibilitychange', this._onVisibility);
+
     // Compile all shader programs in the background before the first render.
     // The first frame would otherwise block the main thread for the full
-    // FXC/ANGLE compile of the terrain FBM shaders.
-    this._warmupInitialShaders();
+    // FXC/ANGLE compile of the terrain FBM shaders. Defer to idle time so it
+    // never competes with the app's first paint.
+    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1));
+    idle(() => { if (!this._disposed) this._warmupInitialShaders(); });
 
     this.renderer.setAnimationLoop(() => this._tick());
   }
@@ -171,6 +203,26 @@ export class Engine {
     gpu = gpu.replace(/\s*\(0x[0-9A-F]+\)/i, '').replace(/\s*Direct3D.*$/i, '').trim();
     if (gpu.length > 42) gpu = gpu.slice(0, 42) + '…';
     this.gpuName = gpu;
+  }
+
+  /**
+   * First-run only: detect the GPU tier and pick a starting performance preset
+   * (low → Performance, medium → Balanced, high → High). Never runs for a
+   * returning user (they have persisted settings). Queues a one-time notice
+   * that is surfaced after the boot overlay clears.
+   */
+  _autoSelectPresetByGpu() {
+    this.gpuTier = detectGpuTier(this.renderer.getContext());
+    saveGpuTier(this.gpuTier);
+    if (!this._firstRun) return;
+    const preset = presetForTier(this.gpuTier);
+    this.perf = createPerfSettings(preset);
+    this.qualityPreset = this.perf.preset;
+    savePerfSettings(this.perf);
+    if (preset !== 'high') {
+      const label = preset === 'performance' ? 'Performance' : 'Balanced';
+      this._tierNotice = `Detected ${this.gpuName} — starting on ${label} quality (change in Performance settings)`;
+    }
   }
 
   _initScene(minimapBase, minimapOverlay) {
@@ -247,6 +299,7 @@ export class Engine {
   setParam(key, value) {
     this.params[key] = value;
     this.cb.onParams({ ...this.params });
+    this._needsRender = true;   // any param change → redraw (on-demand studio)
 
     // cloud params: live shader updates only (never rebuild terrain/planet,
     // never mix into terrain generation)
@@ -255,10 +308,13 @@ export class Engine {
       return;
     }
 
-    // planet geometry params: rebuild the cube-sphere (chunk layout / radius)
+    // planet geometry params: rebuild the cube-sphere (chunk layout / radius).
+    // These come from discrete dropdowns (one change at a time), so rebuild
+    // immediately — App wraps the change in a loading overlay so the brief
+    // freeze is covered. _rebuildPlanet refreshes uniforms itself.
     if (key === 'planetRadius' || key === 'planetFaceGrid') {
-      this._applyUniforms();        // live uniforms (radius, eps)
       if (this.worldMode === 'planet') this._rebuildPlanet();
+      else this._applyUniforms();
       return;
     }
 
@@ -315,6 +371,7 @@ export class Engine {
   }
 
   _notifyPlanetStyle() {
+    this._needsRender = true;
     this._syncPlanetStyleToParams();
     this.cb.onParams(this._paramsSnapshot());
     this.planetStyle.applyToUniforms(this.uniforms);
@@ -434,6 +491,7 @@ export class Engine {
   // Push every parameter into uniforms; rebuild the chunk grid if the world
   // layout changed.
   applyAll({ force }) {
+    this._needsRender = true;
     const p = this.params;
     const rebuildNeeded = force
       || p.chunkCount !== this.appliedChunkCount
@@ -458,12 +516,21 @@ export class Engine {
       this.controls.setBoardSize(size);
       this.minimap.setBoard(size, maxHeight);
       this.cb.onBoard(size);
+
+      // build() starts every chunk at the coarse base LOD; resolve per-chunk
+      // LOD + culling NOW so the first rendered frame already shows the finished
+      // terrain at full detail. Without this the throttled updateLOD (~150ms
+      // later) causes a visible "coarse → detailed" pop when a preset loads.
+      this.camera.updateMatrixWorld(true);
+      this.board.updateLOD(this.camera.position);
+      this.board.cull(this.camera);
+      this._lastLodUpdate = performance.now();
     }
 
     this._applyUniforms();
     this._minimapDirtyAt = performance.now();
     this.minimap.requestRedraw();
-    this.cb.onStatus('Ready', false);
+    if (!this._bootPending) this.cb.onStatus('Ready', false);
   }
 
   _maxHeight() { return this.params.heightScale * 1.35 + 2; }
@@ -481,6 +548,7 @@ export class Engine {
   }
 
   _applyUniforms() {
+    this._needsRender = true;
     this._terrainGen++;   // height field may have changed — refresh collision tile
     const p = this.params;
     const u = this.uniforms;
@@ -546,7 +614,11 @@ export class Engine {
     this._updatePlanetWater();
     this.waterMaterial.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
     this.water.position.y = p.seaLevel;
-    this.water.visible = p.seaLevel > 0.5;
+    // The flat studio water plane belongs to studio mode only. _applyUniforms
+    // also runs while rebuilding the planet/infinite world (e.g. on resize), so
+    // gate visibility by mode — otherwise resizing a planet re-shows the studio
+    // water slab inside the globe.
+    this.water.visible = this.worldMode === 'studio' && p.seaLevel > 0.5;
 
     this.board.updateBounds(this._maxHeight(), this._skirtDepth());
     this._updatePlinth();
@@ -559,10 +631,14 @@ export class Engine {
   _applyPixelRatio() {
     // base = legacy absolute override if set, otherwise device pixel ratio;
     // then scaled by the performance render scale and the auto-perf scale.
+    // On a low-tier GPU, cap the ceiling lower so a 2× HiDPI panel doesn't make
+    // a weak GPU render 4× the pixels.
     const legacy = this.params?.pixelRatio || 0;
-    const base = legacy > 0 ? legacy : Math.min(window.devicePixelRatio, 2);
+    const ceiling = this.gpuTier === 'low' ? 1.25 : 2;
+    const base = legacy > 0 ? legacy : Math.min(window.devicePixelRatio, ceiling);
     const scale = (this.perf?.renderScale ?? 1) * this._autoScale;
-    this.renderer.setPixelRatio(Math.min(2, Math.max(0.3, base * scale)));
+    this.renderer.setPixelRatio(Math.min(ceiling, Math.max(0.3, base * scale)));
+    this._needsRender = true;   // resolution changed → force a redraw
   }
 
   // -------------------------------------------------- async shader compiling
@@ -630,7 +706,43 @@ export class Engine {
       console.warn('Shader warmup failed (falling back to sync compile)', e);
     }
     this._compiling--;
-    if (!this._disposed && !this._compiling) this.cb.onStatus('Ready', false);
+    if (!this._disposed && !this._compiling) {
+      this._bootPending = false;
+      this._renderInitialStudioFrame();
+      this.cb.onStatus('Ready', false);
+      // Surface the first-run GPU-tier notice now that the boot overlay is gone
+      // (info toasts are suppressed while a blocking overlay is up).
+      if (this._tierNotice) { this.cb.onToast(this._tierNotice); this._tierNotice = null; }
+    }
+  }
+
+  _renderInitialStudioFrame() {
+    if (this.worldMode !== 'studio' || !this.board?.chunks?.length) return;
+
+    this.controls.update(0.016);
+    this.camera.updateMatrixWorld(true);
+    this.board.updateLOD(this.camera.position);
+    this.board.cull(this.camera);
+    this._lastLodUpdate = performance.now();
+    this.cb.onLod(
+      [...this.board.lodCounts],
+      this.params.chunkCount,
+      this.board.visibleChunkCount,
+      this.board.culledChunkCount
+    );
+
+    if (this.studioCloud) {
+      this.studioCloud.update(0.016, this.camera.position, this.uniforms.uSunDir.value);
+      this.studioCloud.renderDepthPrepass(this.renderer, this.camera);
+    }
+
+    this.underwater.render(this.renderer, this.scene, this.camera);
+    this._lastTris = this.renderer.info.render.triangles;
+    this._lastDraws = this.renderer.info.render.calls;
+    this._lastRenderAt = performance.now();
+    this._camPos.copy(this.camera.position);
+    this._camQuat.copy(this.camera.quaternion);
+    this._needsRender = false;
   }
 
   /**
@@ -1141,6 +1253,8 @@ export class Engine {
   /** Rebuild the planet for a radius / face-grid change (settings panel). */
   _rebuildPlanet() {
     if (this.worldMode !== 'planet') return;
+    this._needsRender = true;
+    this._applyUniforms();      // radius/grid uniforms must match the rebuilt mesh immediately
     this._buildPlanetWorld();
     this._applyCloudSettings();   // inner/outer shell radii track planetRadius
     this._applyPlanetCamera();
@@ -1152,6 +1266,7 @@ export class Engine {
       c.minDist = r * 1.02;
       c.maxDist = r * 6.0;
       c.goalDist = Math.min(Math.max(c.goalDist, c.minDist), c.maxDist);
+      c.update(0.001);
     }
   }
 
@@ -1246,12 +1361,35 @@ export class Engine {
   setPerfSetting(key, value) {
     if (!(key in this.perf)) return;
     const next = { ...this.perf, [key]: value };
-    // autoPerf / underwater toggles alone don't make the preset custom
-    if (key !== 'autoPerf' && key !== 'underwaterEffect') next.preset = 'custom';
+    // meta toggles that don't change visual quality keep the current preset
+    if (key !== 'autoPerf' && key !== 'underwaterEffect' && key !== 'onDemandStudio') next.preset = 'custom';
     this.perf = sanitizePerfSettings(next);
     if (key === 'autoPerf' && !this.perf.autoPerf) {
       this._autoScale = 1.0;   // leaving auto mode restores full render scale
     }
+    this.qualityPreset = this.perf.preset;
+    this._applyPerformance();
+    this._notifyPerf();
+  }
+
+  /**
+   * Set cloud quality by named tier (low/medium/high/ultra) from the Clouds
+   * panel. Writes the underlying raymarch step keys into `perf` (the single
+   * source of truth) so the Performance tab and Clouds panel always agree.
+   */
+  setCloudQuality(key) {
+    const preset = CLOUD_QUALITY_PRESETS[key];
+    if (!preset) return;
+    const next = {
+      ...this.perf,
+      cloudSteps: preset.steps,
+      cloudLightSteps: preset.lightSteps,
+      cloudOctaves: preset.octaves,
+      cloudDetailOctaves: preset.detailOctaves,
+      cloudUseErosion: preset.useErosion,
+      preset: 'custom',
+    };
+    this.perf = sanitizePerfSettings(next);
     this.qualityPreset = this.perf.preset;
     this._applyPerformance();
     this._notifyPerf();
@@ -1441,6 +1579,7 @@ export class Engine {
       if (key in src && typeof src[key] === typeof DEFAULT_PARAMS[key]) next[key] = src[key];
     }
     this.params = next;
+    this._migrateLegacyCloudPerf(src);
     if (src.planetStyle) this.planetStyle.importJSON({ planetStyle: src.planetStyle });
     else if (src.planetPreset) this.planetStyle.applyPlanetPreset(src.planetPreset);
     this._syncPlanetStyleToParams();
@@ -1448,6 +1587,32 @@ export class Engine {
     this.applyAll({ force: true });
     if (json?.paint) this.paintMode?.load(json.paint);
     this.cb.onToast(`Loaded seed ${this.params.seed}`);
+  }
+
+  /**
+   * Cloud quality/perf knobs used to live in `params` and serialize with the
+   * save. They now live in `perf`. Port any legacy keys from an old save into
+   * the current perf settings once (preset → custom), then they're ignored.
+   */
+  _migrateLegacyCloudPerf(src) {
+    if (!src || !CLOUD_LEGACY_PERF_KEYS.some((k) => k in src)) return;
+    const next = { ...this.perf };
+    if ('cloudSelfShadow' in src) next.cloudSelfShadow = !!src.cloudSelfShadow;
+    if ('cloudMaxDistance' in src) next.cloudMaxDistance = +src.cloudMaxDistance;
+    if ('cloudFallback' in src) next.cloudFallback = src.cloudFallback;
+    if ('cloudQuality' in src && CLOUD_QUALITY_PRESETS[src.cloudQuality]) {
+      const p = CLOUD_QUALITY_PRESETS[src.cloudQuality];
+      next.cloudSteps = p.steps;
+      next.cloudLightSteps = p.lightSteps;
+      next.cloudOctaves = p.octaves;
+      next.cloudDetailOctaves = p.detailOctaves;
+      next.cloudUseErosion = p.useErosion;
+    }
+    next.preset = 'custom';
+    this.perf = sanitizePerfSettings(next);
+    this.qualityPreset = this.perf.preset;
+    this._applyPerformance();
+    this._notifyPerf();
   }
 
   // --------------------------------------------------------------- exports
@@ -1542,9 +1707,29 @@ export class Engine {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this._needsRender = true;   // viewport size changed → redraw
   }
 
   _tick() {
+    // Tab not visible: most browsers pause rAF, but some throttle it to ~1 Hz
+    // instead. Skip all work in that case (and don't advance the clock) so a
+    // backgrounded tab costs nothing; the next visible frame resumes cleanly.
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+
+    // A thrown error inside the animation loop would otherwise permanently
+    // freeze the app (the rAF callback stops being scheduled). Guard the whole
+    // frame so a single bad frame degrades to a logged warning and recovers.
+    try {
+      this._tickBody();
+    } catch (e) {
+      if (!this._tickErrorLogged) {
+        console.error('Render tick error (recovering)', e);
+        this._tickErrorLogged = true;
+      }
+    }
+  }
+
+  _tickBody() {
     const dt = Math.min(this._clock.getDelta(), 0.05);
     const now = performance.now();
     this.uniforms.uTime.value += dt;
@@ -1594,6 +1779,7 @@ export class Engine {
   }
 
   _tickStudio(dt, now) {
+    // Input always runs (so inertia/look settle even when we skip drawing).
     if (this.playerMode && this.player) {
       this.fpsControls.update(dt);   // mouse look
       this.player.update(dt);        // body physics
@@ -1601,53 +1787,81 @@ export class Engine {
       this.controls.update(dt);
     }
 
-    if (this.studioCloud) {
-      this.studioCloud.update(dt, this.camera.position, this.uniforms.uSunDir.value);
-    }
-
-    // Cull invisible chunks based on current camera frustum and facing
-    this.board.cull(this.camera);
-
-    // LOD selection: throttled, distance-based, internal to the fixed board
-    if (now - this._lastLodUpdate > 150) {
-      this._lastLodUpdate = now;
-      this.board.updateLOD(this.camera.position);
-      this.cb.onLod(
-        [...this.board.lodCounts],
-        this.params.chunkCount,
-        this.board.visibleChunkCount,
-        this.board.culledChunkCount
-      );
-    }
-
-    if (this.studioCloud) {
-      this.studioCloud.renderDepthPrepass(this.renderer, this.camera);
-    }
-
-    this.underwater.render(this.renderer, this.scene, this.camera);
-    const triangles = this.renderer.info.render.triangles;
-    const drawCalls = this.renderer.info.render.calls;
-
-    // minimap: re-render base only after params settle, marker every frame
-    if (this.minimap._dirty && now - this._minimapDirtyAt > 280) {
-      this.minimap.renderBase();
-    }
-    this.minimap.drawOverlay(this.controls);
-
-    // HUD updates at ~6 Hz
+    // FPS accounting runs every tick regardless of whether we draw.
     this._frames++;
     if (now - this._fpsTime >= 1000) {
       this._fps = this._frames;
       this._frames = 0;
       this._fpsTime = now;
     }
+
+    // ---- on-demand gate: should we actually draw this frame? ----
+    // Render when anything is animating, the camera moved, a redraw was
+    // requested (param/LOD/resolution change), or the minimap needs a refresh.
+    const cam = this.camera;
+    const moved = this._camPos.distanceToSquared(cam.position) > 1e-7
+      || this._camQuat.angleTo(cam.quaternion) > 1e-5;
+    const animating =
+      (this.params.cloudsEnabled && !!this.studioCloud) ||
+      (this.water.visible && this.params.waterAnim) ||
+      this.underwater.active ||
+      this.playerMode ||
+      !!this.paintState?.enabled ||
+      this.board._lodRebuildQueue.length > 0;
+    const minimapDirty = this.minimap._dirty && now - this._minimapDirtyAt > 280;
+    // Heartbeat safety net: redraw at least ~1 Hz so any state change that
+    // forgot to invalidate self-heals within a second (cheap insurance).
+    const heartbeat = now - this._lastRenderAt > 1000;
+    const shouldRender = !this.perf.onDemandStudio
+      || this._needsRender || moved || animating || minimapDirty || heartbeat;
+
+    if (shouldRender) {
+      this._needsRender = false;
+      this._lastRenderAt = now;
+      this._camPos.copy(cam.position);
+      this._camQuat.copy(cam.quaternion);
+
+      if (this.studioCloud) {
+        this.studioCloud.update(dt, this.camera.position, this.uniforms.uSunDir.value);
+      }
+
+      // Cull invisible chunks based on current camera frustum and facing
+      this.camera.updateMatrixWorld(true);
+      this.board.cull(this.camera);
+
+      // LOD selection: throttled, distance-based, internal to the fixed board
+      if (now - this._lastLodUpdate > 150) {
+        this._lastLodUpdate = now;
+        this.board.updateLOD(this.camera.position);
+        this.cb.onLod(
+          [...this.board.lodCounts],
+          this.params.chunkCount,
+          this.board.visibleChunkCount,
+          this.board.culledChunkCount
+        );
+      }
+
+      if (this.studioCloud) {
+        this.studioCloud.renderDepthPrepass(this.renderer, this.camera);
+      }
+
+      this.underwater.render(this.renderer, this.scene, this.camera);
+      this._lastTris = this.renderer.info.render.triangles;
+      this._lastDraws = this.renderer.info.render.calls;
+
+      // minimap: re-render base only after params settle, marker every frame
+      if (minimapDirty) this.minimap.renderBase();
+      this.minimap.drawOverlay(this.controls);
+    }
+
+    // HUD updates at ~6 Hz (uses last drawn triangle/draw-call counts)
     if (now - this._lastHudUpdate > 160) {
       this._lastHudUpdate = now;
       this.cb.onCamera({
         angle: `${this.controls.azimuthDeg.toFixed(0)}°, ${this.controls.elevationDeg.toFixed(0)}°`,
         distance: this.controls.distance.toFixed(0),
       });
-      this.cb.onStats({ fps: this._fps, triangles, drawCalls });
+      this.cb.onStats({ fps: this._fps, triangles: this._lastTris, drawCalls: this._lastDraws });
       if (this.cb.onPlayerState) {
         this.cb.onPlayerState(this.player ? this.player.state : null);
       }
@@ -1762,6 +1976,7 @@ export class Engine {
     if (this._disposed) return;
     this._disposed = true;
     this._resizeObserver.disconnect();
+    if (this._onVisibility) document.removeEventListener('visibilitychange', this._onVisibility);
     this.renderer.setAnimationLoop(null);
     if (this.paintMode) { this.paintMode.dispose(); this.paintMode = null; }
     if (this.player) { this.player.dispose(); this.player = null; }

@@ -320,6 +320,9 @@ export default function App() {
     onPerfReset: () => engine().resetPerfSettings(),
     timeOfDay, onTimeOfDay: handleTimeOfDay,
     onExport, onExportScreenshot, onExportHeightmap,
+    onNoiseStack: (stack) => engine().setNoiseStack(stack),
+    onSoloLayer: (id) => engine().setSoloLayer(id),
+    _soloLayerId: engineRef.current?._soloLayerId ?? null,
   };
 
   return (

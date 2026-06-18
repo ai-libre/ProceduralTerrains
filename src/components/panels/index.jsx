@@ -15,12 +15,14 @@ import PerformanceStats from '../ui/PerformancePanel.jsx';
 import PlanetSummaryCard from '../ui/PlanetSummaryCard.jsx';
 import { LodPanel, CameraPanel } from '../RightPanels.jsx';
 import PerfSettings from './PerfSettings.jsx';
+import NoiseLayersPanel from '../NoiseLayersPanel.jsx';
 
 // ---- toolbar / panel metadata (single source for icons + labels) ----
 const ic = (children) => <svg viewBox="0 0 20 20" fill="none">{children}</svg>;
 
 export const PANEL_META = {
   terrain: { label: 'Terrain', title: 'Terrain', desc: 'Shape and surface generation.', icon: ic(<path d="M3 15 L8 6 L11 10 L14 7 L17 15 Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />) },
+  noiseLayers: { label: 'Layers', title: 'Noise Layers', desc: 'Stack noise layers to shape terrain.', icon: ic(<><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" /><circle cx="6" cy="6" r="1.3" fill="currentColor" /><circle cx="10" cy="10" r="1.3" fill="currentColor" /><circle cx="14" cy="14" r="1.3" fill="currentColor" /></>) },
   world: { label: 'World', title: 'World', desc: 'Chunking, streaming and grid.', icon: ic(<><rect x="3" y="3" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="3" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="3" y="11" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="11" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /></>) },
   planet: {
     label: 'Planet',
@@ -44,7 +46,7 @@ export const PANEL_META = {
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -448,8 +450,12 @@ function ExportPanel({ ctx }) {
   );
 }
 
+function NoiseLayersPanelWrapper({ ctx }) {
+  return <NoiseLayersPanel ctx={ctx} />;
+}
+
 const COMPONENTS = {
-  terrain: TerrainPanel, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
+  terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
   water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
 };

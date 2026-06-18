@@ -1,6 +1,8 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, HEIGHT_GLSL } from './terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
+import { generateStackGLSL } from './noise/noiseStackCodegen.js';
+import { defaultLegacyStack, MAX_LAYERS } from './noise/NoiseStack.js';
 import {
   PALETTE_UNIFORMS_GLSL,
   TERRAIN_COLOR_FUNCTIONS_GLSL,
@@ -18,11 +20,11 @@ import { DEFAULT_PLANET_STYLE } from '../style/PlanetStyleConfig.js';
 //    cavity AO, chunk grid overlay, LOD debug tint, exp2 fog.
 // ============================================================================
 
-const VERTEX = /* glsl */ `
+const buildVertex = (heightGLSL) => /* glsl */ `
 ${COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
-${HEIGHT_GLSL}
+${heightGLSL}
 
 uniform float uSkirtDepth;
 
@@ -55,13 +57,13 @@ void main() {
 }
 `;
 
-const FRAGMENT = /* glsl */ `
+const buildFragment = (heightGLSL) => /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
-${HEIGHT_GLSL}
+${heightGLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 
@@ -220,26 +222,55 @@ export function createTerrainUniforms() {
     // Ignored by the studio/infinite materials, which never declare them.
     uPlanetHeightTex:    { value: null },
     uUsePlanetHeightTex: { value: 0.0 },
+
+    // Noise Stack per-layer continuous params (shared by every height material).
+    // Packed each param change by Engine from the live NoiseStack; the GLSL
+    // arrays in COMMON_UNIFORMS_GLSL read these.
+    uLayerStrength:  { value: new Array(MAX_LAYERS).fill(0) },
+    uLayerScale:     { value: new Array(MAX_LAYERS).fill(1) },
+    uLayerSeed:      { value: new Array(MAX_LAYERS).fill(0) },
+    uLayerParamsA:   { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Vector4()) },
+    uLayerParamsB:   { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Vector4()) },
+    uLayerMaskA:     { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Vector4()) },
+    uLayerMaskB:     { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Vector4()) },
+    uNoiseDebug:     { value: 0.0 },
     ...paletteUniforms,
   };
 }
 
-export function createTerrainMaterial(uniforms, octaves = 7) {
+// Default stack GLSL (single legacy layer) — used when no stack is supplied so
+// existing call sites stay valid and render exactly as before.
+const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
+
+export function createTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
+  const h = buildHeightGLSL(stackGLSL.body2d);
   return new THREE.ShaderMaterial({
     uniforms,
     defines: { OCTAVES: octaves },
-    vertexShader: VERTEX,
-    fragmentShader: FRAGMENT,
+    vertexShader: buildVertex(h),
+    fragmentShader: buildFragment(h),
     side: THREE.DoubleSide,
   });
 }
 
-export function createInfiniteTerrainMaterial(uniforms, octaves = 7) {
+export function createInfiniteTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
+  const h = buildHeightGLSL(stackGLSL.body2d);
   return new THREE.ShaderMaterial({
     uniforms,
     defines: { OCTAVES: octaves, INFINITE_MODE: 1 },
-    vertexShader: VERTEX,
-    fragmentShader: FRAGMENT,
+    vertexShader: buildVertex(h),
+    fragmentShader: buildFragment(h),
     side: THREE.DoubleSide,
   });
+}
+
+// Update a live terrain material's shader source to a new generated stack
+// in place (same material object → every mesh referencing it updates). The
+// program for the identical source was warm-compiled first, so the relink is
+// served from three's cache.
+export function rebuildTerrainShaderSource(mat, stackGLSL) {
+  const h = buildHeightGLSL(stackGLSL.body2d);
+  mat.vertexShader = buildVertex(h);
+  mat.fragmentShader = buildFragment(h);
+  mat.needsUpdate = true;
 }

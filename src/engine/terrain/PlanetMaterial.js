@@ -2,12 +2,16 @@ import * as THREE from 'three';
 import { COMMON_UNIFORMS_GLSL, NOISE_GLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import {
-  PLANET_UNIFORMS_GLSL, PLANET_NOISE_GLSL, PLANET_HEIGHT_GLSL,
+  PLANET_UNIFORMS_GLSL, PLANET_NOISE_GLSL, buildPlanetHeightGLSL,
 } from './planetGLSL.js';
 import {
   PALETTE_UNIFORMS_GLSL,
   TERRAIN_COLOR_FUNCTIONS_GLSL,
 } from '../shaders/terrainColor.glsl.js';
+import { generateStackGLSL } from './noise/noiseStackCodegen.js';
+import { defaultLegacyStack } from './noise/NoiseStack.js';
+
+const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
 // ============================================================================
 // Planet (cube-sphere) terrain shader. Shares the terrain uniform objects so
@@ -19,13 +23,13 @@ import {
 //    the shared palette, spherical-up lighting, exp2 fog.
 // ============================================================================
 
-const VERTEX = /* glsl */ `
+const buildVertex = (planetHeightGLSL) => /* glsl */ `
 ${COMMON_UNIFORMS_GLSL}
 ${PLANET_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${PLANET_NOISE_GLSL}
-${PLANET_HEIGHT_GLSL}
+${planetHeightGLSL}
 
 uniform float uSkirtDepth;
 
@@ -61,7 +65,7 @@ void main() {
 }
 `;
 
-const FRAGMENT = /* glsl */ `
+const buildFragment = (planetHeightGLSL) => /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
@@ -69,7 +73,7 @@ ${PLANET_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${PLANET_NOISE_GLSL}
-${PLANET_HEIGHT_GLSL}
+${planetHeightGLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 
@@ -200,14 +204,15 @@ function makeFaceUniforms() {
   };
 }
 
-export function createPlanetMaterial(uniforms, octaves = 7) {
+export function createPlanetMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
+  const ph = buildPlanetHeightGLSL(stackGLSL.body3d);
   // Per-chunk face uniforms must NOT be shared — clone fresh ones, merged with
   // the shared terrain/palette uniform objects.
   return new THREE.ShaderMaterial({
     uniforms: { ...uniforms, ...makeFaceUniforms() },
     defines: { OCTAVES: octaves, PLANET_MODE: 1 },
-    vertexShader: VERTEX,
-    fragmentShader: FRAGMENT,
+    vertexShader: buildVertex(ph),
+    fragmentShader: buildFragment(ph),
     // analytic outward normal is computed in the shader, so two-sided shading
     // stays correct; matches the studio/infinite terrain materials.
     side: THREE.DoubleSide,
@@ -232,7 +237,7 @@ void main() {
 }
 `;
 
-const WATER_FRAGMENT = /* glsl */ `
+const buildWaterFragment = (planetHeightGLSL) => /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
@@ -240,7 +245,7 @@ ${PLANET_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${PLANET_NOISE_GLSL}
-${PLANET_HEIGHT_GLSL}
+${planetHeightGLSL}
 ${PALETTE_UNIFORMS_GLSL}
 
 uniform float uWaterAnim;
@@ -341,7 +346,7 @@ void main() {
 }
 `;
 
-export function createPlanetWaterMaterial(uniforms, octaves = 7) {
+export function createPlanetWaterMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
   return new THREE.ShaderMaterial({
     uniforms: {
       ...uniforms,
@@ -354,7 +359,7 @@ export function createPlanetWaterMaterial(uniforms, octaves = 7) {
     },
     defines: { OCTAVES: octaves, PLANET_MODE: 1 },
     vertexShader: WATER_VERTEX,
-    fragmentShader: WATER_FRAGMENT,
+    fragmentShader: buildWaterFragment(buildPlanetHeightGLSL(stackGLSL.body3d)),
     transparent: true,
     depthWrite: false,
     // bias the depth test toward the camera so the transparent shell wins over

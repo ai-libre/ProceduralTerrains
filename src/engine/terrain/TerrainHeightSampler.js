@@ -56,15 +56,22 @@ function vnoise(px, py) {
   return mix32(mix32(a, b, ux), mix32(c, d, ux), uy);
 }
 
+import { evalStack2D } from './noise/noiseStackCodegen.js';
+import { isLegacyStack } from './noise/NoiseStack.js';
+
 export class TerrainHeightSampler {
   /**
    * @param {object} uniforms  shared terrain uniform objects (live references)
    * @param {function} getEnv  () => ({ octaves:number, infinite:boolean })
+   * @param {object} [stack]   live NoiseStack (custom stacks use the f64 evaluator)
    */
-  constructor(uniforms, getEnv) {
+  constructor(uniforms, getEnv, stack = null) {
     this.u = uniforms;
     this.getEnv = getEnv;
+    this.stack = stack;
   }
+
+  setStack(stack) { this.stack = stack; }
 
   _fbm(px, py, octaves) {
     const pers = f(this.u.uPersistence.value);
@@ -143,8 +150,37 @@ export class TerrainHeightSampler {
     return f(f(Math.floor(t) + s) / steps);
   }
 
+  // ctx for the generic f64 stack evaluator. legacy2d delegates back to the
+  // exact f32 legacy recipe so a legacy layer inside a custom stack matches.
+  _ctx() {
+    if (!this._ctxObj) {
+      this._ctxObj = { uniforms: this.u, legacy2d: (x, z) => this._legacyShape2D(x, z) };
+    }
+    return this._ctxObj;
+  }
+
   /** World-space terrain height at world position (x, z). */
   heightAt(x, z) {
+    const u = this.u;
+    const env = this.getEnv();
+
+    let h = (this.stack && !isLegacyStack(this.stack))
+      ? evalStack2D(this.stack, x, z, this._ctx())
+      : this._legacyShape2D(x, z);
+
+    // island falloff (studio board only) + clamp + world height scale
+    if (!env.infinite) {
+      const half = f(u.uBoardHalf.value);
+      const ex = f(Math.abs(f(x)) / half), ey = f(Math.abs(f(z)) / half);
+      const edge = mix32(Math.max(ex, ey), f(Math.hypot(ex, ey) * 0.7071), 0.5);
+      const t = clamp(f(f(1 - edge) / Math.max(f(u.uFalloff.value), 1e-3)), 0, 1);
+      h = f(h * f(f(t * t) * f(3 - f(2 * t))));
+    }
+    return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
+  }
+
+  /** Legacy biome-coupled recipe (layers 1-6), h in ~0..1.35 (pre falloff/scale). */
+  _legacyShape2D(x, z) {
     const u = this.u;
     const env = this.getEnv();
     const octaves = env.octaves;
@@ -191,16 +227,7 @@ export class TerrainHeightSampler {
     // layer 6: canyon strata terracing
     h = mix32(h, this._terrace(h, 14.0), f(bw.canyon * 0.75));
 
-    // layer 7: island falloff (studio board only)
-    if (!env.infinite) {
-      const half = f(u.uBoardHalf.value);
-      const ex = f(Math.abs(f(x)) / half), ey = f(Math.abs(f(z)) / half);
-      const edge = mix32(Math.max(ex, ey), f(Math.hypot(ex, ey) * 0.7071), 0.5);
-      const t = clamp(f(f(1 - edge) / Math.max(f(u.uFalloff.value), 1e-3)), 0, 1);
-      h = f(h * f(f(t * t) * f(3 - f(2 * t))));
-    }
-
-    return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
+    return h;
   }
 
   /**

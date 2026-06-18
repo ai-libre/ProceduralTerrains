@@ -5,12 +5,16 @@ import { zipSync } from 'fflate';
 import { COMMON_UNIFORMS_GLSL, NOISE_GLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import {
-  PLANET_UNIFORMS_GLSL, PLANET_NOISE_GLSL, PLANET_HEIGHT_GLSL,
+  PLANET_UNIFORMS_GLSL, PLANET_NOISE_GLSL, buildPlanetHeightGLSL,
 } from './planetGLSL.js';
 import {
   PALETTE_UNIFORMS_GLSL, TERRAIN_COLOR_FUNCTIONS_GLSL,
 } from '../shaders/terrainColor.glsl.js';
 import { PlanetHeightSampler } from './PlanetHeightSampler.js';
+import { generateStackGLSL } from './noise/noiseStackCodegen.js';
+import { defaultLegacyStack } from './noise/NoiseStack.js';
+
+const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
 // ============================================================================
 // PlanetExporter: bakes the full cube-sphere planet into a single watertight
@@ -36,14 +40,14 @@ const BAKE_VERTEX = /* glsl */ `
   void main() { vUv = uv; gl_Position = vec4(position, 1.0); }
 `;
 
-const BAKE_FRAGMENT = /* glsl */ `
+const buildBakeFragment = (planetHeightGLSL) => /* glsl */ `
   precision highp float;
   ${COMMON_UNIFORMS_GLSL}
   ${PLANET_UNIFORMS_GLSL}
   ${NOISE_GLSL}
   ${BIOME_GLSL}
   ${PLANET_NOISE_GLSL}
-  ${PLANET_HEIGHT_GLSL}
+  ${planetHeightGLSL}
   ${PALETTE_UNIFORMS_GLSL}
   ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 
@@ -127,7 +131,7 @@ function canvasToPng(canvas) {
 }
 
 export class PlanetExporter {
-  static async export(renderer, params, uniforms, options, onToast) {
+  static async export(renderer, params, uniforms, options, onToast, stackGLSL = DEFAULT_STACK_GLSL, stack = null) {
     const format = options.format || 'glb';
     const meshRes = parseInt(options.meshRes, 10) || 128;   // quads per face side
     const bakeColor = options.bakeColor !== false;
@@ -142,7 +146,7 @@ export class PlanetExporter {
 
     const sampler = new PlanetHeightSampler(uniforms, () => ({
       octaves: Math.round(params.octaves),
-    }));
+    }), stack);
 
     // GPU bake setup (shared across faces)
     const quadScene = new THREE.Scene();
@@ -164,7 +168,7 @@ export class PlanetExporter {
       defines: { OCTAVES: Math.round(params.octaves), PLANET_MODE: 1 },
       uniforms: bakeUniforms,
       vertexShader: BAKE_VERTEX,
-      fragmentShader: BAKE_FRAGMENT,
+      fragmentShader: buildBakeFragment(buildPlanetHeightGLSL(stackGLSL.body3d)),
     });
     quadMesh.material = bakeMat;
 

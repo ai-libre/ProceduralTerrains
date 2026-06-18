@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMaterial } from './terrain/TerrainMaterial.js';
-import { createWaterMaterial, createInfiniteWaterMaterial } from './terrain/WaterMaterial.js';
+import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMaterial, rebuildTerrainShaderSource } from './terrain/TerrainMaterial.js';
+import { createWaterMaterial, createInfiniteWaterMaterial, rebuildWaterShaderSource } from './terrain/WaterMaterial.js';
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
 import { PlanetWorld } from './terrain/PlanetWorld.js';
@@ -33,6 +33,8 @@ import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
 import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
 import { PlayerController } from './player/PlayerController.js';
+import { migrateStack } from './terrain/noise/NoiseStack.js';
+import { generateStackGLSL, packStackUniforms } from './terrain/noise/noiseStackCodegen.js';
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 import { PaintModeManager } from '../paint/PaintModeManager.js';
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
@@ -81,6 +83,13 @@ export class Engine {
     this.canvas = canvas;
     this.cb = callbacks;
     this.params = { ...DEFAULT_PARAMS };
+    // Live Noise Stack (drives terrain shape). Migrated from params so old saves
+    // get the default single Classic-Terrain layer == bit-identical to before.
+    this.noiseStack = migrateStack(this.params.noiseStack);
+    this.params.noiseStack = this.noiseStack;
+    this._stackGLSL = generateStackGLSL(this.noiseStack);
+    this._stackSig = this._stackGLSL.sig;
+    this._soloLayerId = null;       // solo-preview gate (uniform-only, no recompile)
     this.appliedChunkCount = 0;
     this.appliedChunkSize = 0;
     this._minimapDirtyAt = 0;
@@ -240,11 +249,12 @@ export class Engine {
 
     // shared shader uniforms: terrain + water read the same objects
     this.uniforms = createTerrainUniforms();
-    this.terrainMaterial = createTerrainMaterial(this.uniforms);
+    const oct0 = Math.round(this.params.octaves);
+    this.terrainMaterial = createTerrainMaterial(this.uniforms, oct0, this._stackGLSL);
     this.board = new TerrainBoard(this.scene, this.terrainMaterial);
 
     // water plane at sea level
-    this.waterMaterial = createWaterMaterial(this.uniforms);
+    this.waterMaterial = createWaterMaterial(this.uniforms, oct0, this._stackGLSL);
     this.water = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.waterMaterial);
     this.water.geometry.rotateX(-Math.PI / 2);
     this.water.renderOrder = 10;
@@ -528,6 +538,107 @@ export class Engine {
     this.minimap.requestRedraw();
   }
 
+  // -------------------------------------------------------------- noise stack
+
+  _packNoiseUniforms() {
+    const u = this.uniforms;
+    const p = packStackUniforms(this.noiseStack, { solo: this._soloLayerId });
+    for (let i = 0; i < p.strength.length; i++) {
+      u.uLayerStrength.value[i] = p.strength[i];
+      u.uLayerScale.value[i] = p.scale[i];
+      u.uLayerSeed.value[i] = p.seed[i];
+      u.uLayerParamsA.value[i].set(p.paramsA[i][0], p.paramsA[i][1], p.paramsA[i][2], p.paramsA[i][3]);
+      u.uLayerParamsB.value[i].set(p.paramsB[i][0], p.paramsB[i][1], p.paramsB[i][2], p.paramsB[i][3]);
+      u.uLayerMaskA.value[i].set(p.maskA[i][0], p.maskA[i][1], p.maskA[i][2], p.maskA[i][3]);
+      u.uLayerMaskB.value[i].set(p.maskB[i][0], p.maskB[i][1], p.maskB[i][2], p.maskB[i][3]);
+    }
+  }
+
+  /**
+   * Replace the live Noise Stack. Continuous edits = uniform repack (instant).
+   * Structural edits (add/remove/reorder/type/blend/mask/octave) regenerate the
+   * GLSL and recompile materials in the background, mirroring _setOctavesAsync.
+   */
+  setNoiseStack(stack, { solo = this._soloLayerId } = {}) {
+    this.noiseStack = stack;
+    this.params.noiseStack = stack;
+    this._soloLayerId = solo;
+    if (this.heightSampler?.cpu?.setStack) this.heightSampler.cpu.setStack(stack);
+    if (this.planetSampler) this.planetSampler.setStack(stack);
+
+    const next = generateStackGLSL(stack);
+    const structural = next.sig !== this._stackSig;
+    this._stackGLSL = next;
+    this._stackSig = next.sig;
+    this.cb.onParams({ ...this.params });
+
+    if (structural) {
+      if (this.worldMode === 'planet') {
+        // Planet chunks each own a material built from a factory; rebuild the
+        // whole planet (and re-bake the height cubemap) with the new stack.
+        this._rebuildPlanet();
+      } else {
+        this._rebuildStackMaterialsAsync();
+      }
+    } else {
+      this._applyUniforms();
+      this._minimapDirtyAt = performance.now();
+      this.minimap.requestRedraw();
+      if (this.worldMode === 'planet') this._bakedTerrainGen = -1; // force re-bake
+      this._needsRender = true;
+    }
+  }
+
+  setSoloLayer(id) {
+    this._soloLayerId = id || null;
+    this._packNoiseUniforms();
+    this._needsRender = true;
+    this._minimapDirtyAt = performance.now();
+    this.minimap.requestRedraw();
+  }
+
+  /**
+   * Recompile the studio/infinite height materials for the new generated stack
+   * GLSL in the background, then update the LIVE materials' shader source in
+   * place once the identical programs are cached (no freeze, no mesh swap).
+   * Same warm-then-swap pattern as _setOctavesAsync.
+   */
+  async _rebuildStackMaterialsAsync() {
+    const token = ++this._octToken;
+    this.cb.onStatus('Compiling noise stack…', true);
+    const oct = Math.round(this.params.octaves);
+    const sg = this._stackGLSL;
+
+    const warm = [
+      createTerrainMaterial(this.uniforms, oct, sg),
+      createWaterMaterial(this.uniforms, oct, sg),
+    ];
+    if (this.worldMode === 'infinite') {
+      warm.push(createInfiniteTerrainMaterial(this.uniforms, oct, sg));
+      warm.push(createInfiniteWaterMaterial(this.uniforms, oct, sg));
+    }
+
+    try {
+      await this._compileMaterialVariants(warm);
+    } catch (e) {
+      console.warn('Noise stack shader compile failed', e);
+    }
+    if (token === this._octToken && !this._disposed) {
+      // update live materials in place (programs already cached from `warm`)
+      rebuildTerrainShaderSource(this.terrainMaterial, sg);
+      rebuildWaterShaderSource(this.waterMaterial, sg);
+      if (this._infiniteTerrainMat) rebuildTerrainShaderSource(this._infiniteTerrainMat, sg);
+      if (this._infiniteWaterMat) rebuildWaterShaderSource(this._infiniteWaterMat, sg);
+      if (this.heightSampler) this.heightSampler.invalidate();
+      this._applyUniforms();
+      if (!this._compiling) this.cb.onStatus('Ready', false);
+      this._minimapDirtyAt = performance.now();
+      this.minimap.requestRedraw();
+      this._needsRender = true;
+    }
+    this._matTrash.push({ mats: warm, at: performance.now() + 2000 });
+  }
+
   // Push every parameter into uniforms; rebuild the chunk grid if the world
   // layout changed.
   applyAll({ force }) {
@@ -623,6 +734,10 @@ export class Engine {
     u.uPlanetRadius.value = p.planetRadius;
     // angular epsilon for analytic planet normals ≈ one finest-LOD quad
     u.uPlanetEps.value = 2.0 / (this._planetFaceGrid() * 64);
+
+    // Noise Stack: pack per-layer continuous params into the shared uniform
+    // arrays (live, no recompile — drives stackHeight2D / stackHeight3D).
+    this._packNoiseUniforms();
 
     // In infinite mode, fog and sun are managed by FogManager + TimeOfDay.
     // Only apply studio fog settings when NOT in infinite mode.

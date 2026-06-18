@@ -1,7 +1,11 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, HEIGHT_GLSL } from './terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
+import { generateStackGLSL } from './noise/noiseStackCodegen.js';
+import { defaultLegacyStack } from './noise/NoiseStack.js';
+
+const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
 // ============================================================================
 // Sea-level water plane. Shares the terrain uniforms + height function so
@@ -19,13 +23,13 @@ void main() {
 }
 `;
 
-const FRAGMENT = /* glsl */ `
+const buildFragment = (heightGLSL) => /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
-${HEIGHT_GLSL}
+${heightGLSL}
 ${PALETTE_UNIFORMS_GLSL}
 
 uniform float uWaterAnim;
@@ -124,7 +128,7 @@ function waterQualityUniforms() {
   };
 }
 
-export function createWaterMaterial(sharedUniforms, octaves = 7) {
+export function createWaterMaterial(sharedUniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
   const uniforms = {
     ...sharedUniforms,                 // share uniform OBJECTS with terrain
     ...waterQualityUniforms(),
@@ -136,7 +140,7 @@ export function createWaterMaterial(sharedUniforms, octaves = 7) {
     uniforms,
     defines: { OCTAVES: octaves },
     vertexShader: VERTEX,
-    fragmentShader: FRAGMENT,
+    fragmentShader: buildFragment(buildHeightGLSL(stackGLSL.body2d)),
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
@@ -144,8 +148,14 @@ export function createWaterMaterial(sharedUniforms, octaves = 7) {
   return mat;
 }
 
+// Update a live water material's height shader source in place to a new stack.
+export function rebuildWaterShaderSource(mat, stackGLSL) {
+  mat.fragmentShader = buildFragment(buildHeightGLSL(stackGLSL.body2d));
+  mat.needsUpdate = true;
+}
+
 // Infinite mode variant: same shader with INFINITE_MODE define.
-export function createInfiniteWaterMaterial(sharedUniforms, octaves = 7) {
+export function createInfiniteWaterMaterial(sharedUniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
   const uniforms = {
     ...sharedUniforms,
     ...waterQualityUniforms(),
@@ -157,7 +167,7 @@ export function createInfiniteWaterMaterial(sharedUniforms, octaves = 7) {
     uniforms,
     defines: { OCTAVES: octaves, INFINITE_MODE: 1 },
     vertexShader: VERTEX,
-    fragmentShader: FRAGMENT,
+    fragmentShader: buildFragment(buildHeightGLSL(stackGLSL.body2d)),
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,

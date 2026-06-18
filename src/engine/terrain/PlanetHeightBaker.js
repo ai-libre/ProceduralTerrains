@@ -2,8 +2,12 @@ import * as THREE from 'three';
 import { COMMON_UNIFORMS_GLSL, NOISE_GLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import {
-  PLANET_UNIFORMS_GLSL, PLANET_NOISE_GLSL, PLANET_HEIGHT_GLSL,
+  PLANET_UNIFORMS_GLSL, PLANET_NOISE_GLSL, buildPlanetHeightGLSL,
 } from './planetGLSL.js';
+import { generateStackGLSL } from './noise/noiseStackCodegen.js';
+import { defaultLegacyStack } from './noise/NoiseStack.js';
+
+const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
 // ============================================================================
 // Planet height/normal cubemap baker.
@@ -41,7 +45,7 @@ void main() {
 }
 `;
 
-const BAKE_FRAGMENT = /* glsl */ `
+const buildBakeFragment = (planetHeightGLSL) => /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
@@ -49,7 +53,7 @@ ${PLANET_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${PLANET_NOISE_GLSL}
-${PLANET_HEIGHT_GLSL}
+${planetHeightGLSL}
 
 varying vec3 vDir;
 
@@ -113,29 +117,31 @@ export class PlanetHeightBaker {
     this.bakeScene.add(this.mesh);
 
     this._octaves = -1;
+    this._stackSig = null;
   }
 
   get texture() { return this.target.texture; }
 
-  _ensureMaterial(octaves) {
-    if (this.material && this._octaves === octaves) return;
+  _ensureMaterial(octaves, stackGLSL) {
+    if (this.material && this._octaves === octaves && this._stackSig === stackGLSL.sig) return;
     if (this.material) this.material.dispose();
     this.material = new THREE.ShaderMaterial({
       uniforms: this.uniforms,           // share the live height uniforms
       defines: { OCTAVES: octaves, PLANET_MODE: 1 },
       vertexShader: BAKE_VERTEX,
-      fragmentShader: BAKE_FRAGMENT,
+      fragmentShader: buildBakeFragment(buildPlanetHeightGLSL(stackGLSL.body3d)),
       side: THREE.BackSide,              // camera sits inside the box
       depthTest: false,
       depthWrite: false,
     });
     this.mesh.material = this.material;
     this._octaves = octaves;
+    this._stackSig = stackGLSL.sig;
   }
 
   /** Re-evaluate the height field into the cubemap from the current uniforms. */
-  bake(octaves) {
-    this._ensureMaterial(octaves);
+  bake(octaves, stackGLSL = DEFAULT_STACK_GLSL) {
+    this._ensureMaterial(octaves, stackGLSL);
     const r = this.renderer;
     const prevTarget = r.getRenderTarget();
     // CubeCamera renders all six faces and restores the render target itself,

@@ -4,6 +4,9 @@
 // every consumer evaluates the exact same deterministic height function.
 // ============================================================================
 
+import { NOISE_STACK_PRIMS2D_GLSL } from './noise/noisePrimsGLSL.js';
+import { NOISE_STACK_MASKS2D_GLSL } from './noise/masks.js';
+
 export const COMMON_UNIFORMS_GLSL = /* glsl */ `
 uniform vec2  uSeedOffset;     // deterministic domain offset derived from seed
 uniform float uFrequency;      // base noise frequency (1/world units)
@@ -28,6 +31,19 @@ uniform float uPaintResolution;
 uniform float uPaintHeightRange;
 uniform sampler2D uPaintHeightTexture;
 uniform sampler2D uPaintBiomeTexture;
+
+// --- Noise Stack: per-layer continuous params (declared once, used by the
+// codegen-injected stackHeight2D / stackHeight3D). MUST match MAX_LAYERS in
+// src/engine/terrain/noise/NoiseStack.js.
+#define MAX_NOISE_LAYERS 12
+uniform float uLayerStrength[MAX_NOISE_LAYERS]; // strength * opacity (and solo gate)
+uniform float uLayerScale[MAX_NOISE_LAYERS];    // primary frequency lane
+uniform float uLayerSeed[MAX_NOISE_LAYERS];     // per-layer domain decorrelation
+uniform vec4  uLayerParamsA[MAX_NOISE_LAYERS];  // type-specific continuous lanes
+uniform vec4  uLayerParamsB[MAX_NOISE_LAYERS];
+uniform vec4  uLayerMaskA[MAX_NOISE_LAYERS];    // height mask (min,max,falloff,flags)
+uniform vec4  uLayerMaskB[MAX_NOISE_LAYERS];    // noise mask (scale,threshold,soft,invert)
+uniform float uNoiseDebug;                      // debug view selector (0 = off)
 `;
 
 export const NOISE_GLSL = /* glsl */ `
@@ -103,30 +119,39 @@ float ridgedFBM(vec2 p) {
 }
 `;
 
-export const HEIGHT_GLSL = /* glsl */ `
 // ============================================================================
 // The terrain height field. Pure function of world XZ + uniforms — fully
 // deterministic for a given seed, never influenced by the camera.
-// Layers: climate-driven biome weights -> domain warp -> base FBM with
-// biome amplitude -> desert dunes -> ridged mountains gated by chain noise
-// AND climate -> wetland flattening -> canyon strata terracing -> island
-// edge falloff (studio mode only).
-// Requires BIOME_GLSL to be included first.
+//
+// The actual stack of noise layers (stackHeight2D) is GENERATED from the live
+// NoiseStack by noiseStackCodegen.generateStackGLSL() and injected here via
+// buildHeightGLSL(stackBody2D). The default stack is a single `legacy` layer
+// whose noise is legacyShape2D() — the original biome-coupled recipe — so
+// default projects render bit-identically to before.
+//
+// Requires BIOME_GLSL (Climate / BiomeWeights / biomeWeightsAt) to be included
+// first, and NOISE_GLSL (vnoise / fbm / fbm4 / ridgedFBM / ROT2).
 // ============================================================================
 
+// Build the full height GLSL block for a generated 2D stack body. The body is a
+// sequence of per-layer blocks that read pw/h and the uLayer* uniform arrays.
+export function buildHeightGLSL(stackBody2D) {
+  return /* glsl */ `
+${NOISE_STACK_PRIMS2D_GLSL}
+${NOISE_STACK_MASKS2D_GLSL}
+
 // Canyon/badlands strata: smooth terrace steps. C1-smooth so normals stay
-// clean; the canyon weight controls how strongly it is applied.
+// clean. Used by the legacy recipe and the Terrace modifier layer.
 float terrace(float h, float steps) {
   float t = h * steps;
   float s = smoothstep(0.20, 0.80, fract(t));
   return (floor(t) + s) / steps;
 }
 
-// Height with an externally supplied climate sample. Callers that take
-// several nearby taps (finite-difference normals) reuse one climate sample;
-// the climate fields are far lower frequency than the tap epsilon, so the
-// approximation error is negligible.
-float shapeHeight(vec2 xz, Climate c) {
+// The original biome-coupled recipe (layers 1-6), returning h in ~0..1.35
+// BEFORE island falloff and the uHeightScale multiply (the wrapper applies
+// those to the whole stack). This is the legacy noise type.
+float legacyShape2D(vec2 xz, Climate c) {
   vec2 p = xz * uFrequency + uSeedOffset;
   BiomeWeights bw = biomeWeightsAt(c);
 
@@ -165,16 +190,28 @@ float shapeHeight(vec2 xz, Climate c) {
   // layer 6: canyon/badlands strata terracing
   h = mix(h, terrace(h, 14.0), bw.canyon * 0.75);
 
+  return h;
+}
+
+// Codegen-injected noise stack. Accumulates h from the ordered layers; pw is
+// the (possibly domain-warped) noise-domain coordinate shared by all layers.
+float stackHeight2D(vec2 xz, Climate c) {
+  vec2 pw = xz * uFrequency + uSeedOffset;
+  float h = 0.0;
+${stackBody2D}
+  return h;
+}
+
+// Finalize: island falloff (studio board only) + clamp + world height scale.
+float shapeHeight(vec2 xz, Climate c) {
+  float h = stackHeight2D(xz, c);
 #ifndef INFINITE_MODE
-  // layer 7: island/continent falloff toward board edges (square+radial blend)
-  // Skipped in infinite mode — terrain continues without boundaries.
+  // island/continent falloff toward board edges (square+radial blend)
   vec2 e = abs(xz) / uBoardHalf;
   float edge = mix(max(e.x, e.y), length(e) * 0.7071, 0.5);
   float t = clamp((1.0 - edge) / max(uFalloff, 1e-3), 0.0, 1.0);
-  float fall = t * t * (3.0 - 2.0 * t);
-  h *= fall;
+  h *= t * t * (3.0 - 2.0 * t);
 #endif
-
   return clamp(h, 0.0, 1.35) * uHeightScale;
 }
 
@@ -206,3 +243,4 @@ float moistureAt(vec2 xz) {
   return climateAt(xz * uFrequency + uSeedOffset).moist;
 }
 `;
+}

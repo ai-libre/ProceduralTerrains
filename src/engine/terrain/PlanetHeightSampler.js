@@ -58,14 +58,28 @@ function vnoise3(px, py, pz) {
   return mix32(a, b, uz);
 }
 
+import { evalStack3D } from './noise/noiseStackCodegen.js';
+import { isLegacyStack } from './noise/NoiseStack.js';
+
 export class PlanetHeightSampler {
   /**
    * @param {object} uniforms  shared terrain uniform objects (live references)
    * @param {function} getEnv  () => ({ octaves:number })
+   * @param {object} [stack]   live NoiseStack (custom stacks use the f64 evaluator)
    */
-  constructor(uniforms, getEnv) {
+  constructor(uniforms, getEnv, stack = null) {
     this.u = uniforms;
     this.getEnv = getEnv;
+    this.stack = stack;
+  }
+
+  setStack(stack) { this.stack = stack; }
+
+  _ctx() {
+    if (!this._ctxObj) {
+      this._ctxObj = { uniforms: this.u, legacy3d: (dx, dy, dz) => this._legacyShape3D(dx, dy, dz) };
+    }
+    return this._ctxObj;
   }
 
   _fbm3D(px, py, pz, octaves) {
@@ -162,6 +176,15 @@ export class PlanetHeightSampler {
   /** Terrain height (world units) above the base radius, for a unit direction. */
   heightAt3D(dx, dy, dz) {
     const u = this.u;
+    const h = (this.stack && !isLegacyStack(this.stack))
+      ? evalStack3D(this.stack, dx, dy, dz, this._ctx())
+      : this._legacyShape3D(dx, dy, dz);
+    return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
+  }
+
+  /** Legacy biome-coupled recipe (layers 1-6), h in ~0..1.35 (pre scale). */
+  _legacyShape3D(dx, dy, dz) {
+    const u = this.u;
     const oct = this.getEnv().octaves;
     const [px, py, pz] = this._domain(dx, dy, dz);
     const c = this._climate(dx, dy, dz);
@@ -203,7 +226,7 @@ export class PlanetHeightSampler {
     // layer 6: canyon strata terracing
     h = mix32(h, this._terrace(h, 14.0), f(bw.canyon * 0.75));
 
-    return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
+    return h;
   }
 
   /** Surface radius (planet radius + terrain height) along a world direction. */

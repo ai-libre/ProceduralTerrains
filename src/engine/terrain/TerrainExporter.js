@@ -2,12 +2,16 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { zipSync } from 'fflate';
-import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, HEIGHT_GLSL } from './terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import {
   PALETTE_UNIFORMS_GLSL,
   TERRAIN_COLOR_FUNCTIONS_GLSL,
 } from '../shaders/terrainColor.glsl.js';
+import { generateStackGLSL } from './noise/noiseStackCodegen.js';
+import { defaultLegacyStack } from './noise/NoiseStack.js';
+
+const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
 // Quad shaders for baking
 const BAKE_VERTEX = /* glsl */ `
@@ -18,13 +22,13 @@ const BAKE_VERTEX = /* glsl */ `
   }
 `;
 
-const BAKE_FRAGMENT = /* glsl */ `
+const buildBakeFragment = (heightGLSL) => /* glsl */ `
   precision highp float;
 
   ${COMMON_UNIFORMS_GLSL}
   ${NOISE_GLSL}
   ${BIOME_GLSL}
-  ${HEIGHT_GLSL}
+  ${heightGLSL}
   ${PALETTE_UNIFORMS_GLSL}
   ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 
@@ -142,7 +146,7 @@ async function canvasToUint8Array(canvas) {
 }
 
 export class TerrainExporter {
-  static async export(renderer, engineParams, engineUniforms, boardSize, options, onToast) {
+  static async export(renderer, engineParams, engineUniforms, boardSize, options, onToast, stackGLSL = DEFAULT_STACK_GLSL) {
     const format = options.format || 'glb';
     const meshRes = parseInt(options.meshRes, 10) || 256;
     const includeMesh = options.includeMesh !== false;
@@ -190,7 +194,7 @@ export class TerrainExporter {
       defines: { OCTAVES: oct },
       uniforms: bakeUniforms,
       vertexShader: BAKE_VERTEX,
-      fragmentShader: BAKE_FRAGMENT
+      fragmentShader: buildBakeFragment(buildHeightGLSL(stackGLSL.body2d))
     });
     quadMesh.material = bakeMat;
 

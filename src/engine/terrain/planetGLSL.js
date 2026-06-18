@@ -14,6 +14,9 @@
 // hard constant — dynamic trip counts hang ANGLE's D3D11 shader compiler.
 // ============================================================================
 
+import { NOISE_STACK_PRIMS3D_GLSL } from './noise/noisePrimsGLSL.js';
+import { NOISE_STACK_MASKS3D_GLSL } from './noise/masks.js';
+
 export const PLANET_UNIFORMS_GLSL = /* glsl */ `
 uniform float uPlanetRadius;   // sphere base radius in world units
 uniform float uPlanetEps;      // angular epsilon for analytic normals
@@ -111,7 +114,15 @@ float ridgedFBM3D(vec3 p) {
 }
 `;
 
-export const PLANET_HEIGHT_GLSL = /* glsl */ `
+// Build the planet height GLSL block for a generated 3D stack body. Twin of
+// terrainGLSL.buildHeightGLSL — the codegen injects stackHeight3D and the
+// default stack is a single `legacy` layer (legacyShape3D) so planets render
+// bit-identically to before by default.
+export function buildPlanetHeightGLSL(stackBody3D) {
+  return /* glsl */ `
+${NOISE_STACK_PRIMS3D_GLSL}
+${NOISE_STACK_MASKS3D_GLSL}
+
 // Noise-domain point for a unit direction. Scaling by (radius * frequency)
 // makes surface features the same world-size as in the flat board modes:
 // moving along the surface by world distance d shifts the domain by ~d*freq.
@@ -143,9 +154,9 @@ Climate planetClimateAt(vec3 dir) {
   return c;
 }
 
-// Radial terrain height (world units) for a unit direction. Same 7-layer
-// recipe as shapeHeight() minus the board-edge falloff (a sphere has no edge).
-float heightAt3D(vec3 dir) {
+// The original biome-coupled recipe (layers 1-6) for a unit direction, h in
+// ~0..1.35 BEFORE the uHeightScale multiply. This is the legacy noise type.
+float legacyShape3D(vec3 dir) {
   vec3 p = planetDomain(dir);
   Climate c = planetClimateAt(dir);
   BiomeWeights bw = biomeWeightsAt(c);
@@ -184,6 +195,23 @@ float heightAt3D(vec3 dir) {
   // layer 6: canyon strata terracing
   h = mix(h, planetTerrace(h, 14.0), bw.canyon * 0.75);
 
+  return h;
+}
+
+// Codegen-injected noise stack on the sphere; pw is the (domain-warped) 3D
+// noise coordinate shared by all layers.
+float stackHeight3D(vec3 dir) {
+  vec3 pw = planetDomain(dir);
+  float h = 0.0;
+${stackBody3D}
+  return h;
+}
+
+// Radial terrain height (world units) for a unit direction — no board falloff
+// (a sphere has no edge).
+float heightAt3D(vec3 dir) {
+  float h = stackHeight3D(dir);
   return clamp(h, 0.0, 1.35) * uHeightScale;
 }
 `;
+}

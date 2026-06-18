@@ -1,10 +1,13 @@
 {
-  "version": "0.0.1",
+  "version": "0.5.2",
   "configurations": [
     {
       "name": "dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 6061,
       "autoPort": true
     }

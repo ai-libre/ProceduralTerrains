@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import { APP_NAME, APP_VERSION } from '../constants/app.js';
+import WorldModeBar from './WorldModeBar.jsx';
 
 const Icon = ({ d, viewBox = '0 0 16 16', fill }) => (
   <svg viewBox={viewBox}>
@@ -8,12 +9,6 @@ const Icon = ({ d, viewBox = '0 0 16 16', fill }) => (
       : <path d={d} stroke="currentColor" fill={fill ?? 'none'} strokeWidth="1.2" />}
   </svg>
 );
-
-const MODES = [
-  { id: 'studio', label: 'Tile' },
-  { id: 'infinite', label: 'Infinite World' },
-  { id: 'planet', label: 'Planet' },
-];
 
 export default function TopBar({
   previewMode, worldMode, onNew, onRandomize, onSave, onLoadJSON,
@@ -78,19 +73,7 @@ export default function TopBar({
         </button>
       </div>
 
-      <div className="tb-segment" role="group" aria-label="World mode">
-        {MODES.map((m) => (
-          <button
-            key={m.id}
-            className={`tb-mode${worldMode === m.id ? ' active' : ''}`}
-            onClick={() => onSetWorldMode(m.id)}
-            disabled={modeLocked}
-            aria-pressed={worldMode === m.id}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
+      <WorldModeBar worldMode={worldMode} onSetWorldMode={onSetWorldMode} modeLocked={modeLocked} />
 
       <div className="tb-group tb-right">
         {loading && (

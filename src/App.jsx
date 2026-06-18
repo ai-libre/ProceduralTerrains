@@ -8,6 +8,7 @@ import TopBar from './components/TopBar.jsx';
 import LeftToolbar from './components/ui/LeftToolbar.jsx';
 import SideDrawer from './components/ui/SideDrawer.jsx';
 import BottomToolbar from './components/BottomToolbar.jsx';
+import WorldModeBar from './components/WorldModeBar.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import InfiniteHUD from './components/InfiniteHUD.jsx';
 import MinimapOverlay from './components/MinimapOverlay.jsx';
@@ -37,7 +38,7 @@ export default function App() {
   const [gpu, setGpu] = useState('–');
 
   const [camMode, setCamMode] = useState('orbit');
-  const [helpVisible, setHelpVisible] = useState(true);
+  const [helpVisible, setHelpVisible] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [activePanel, setActivePanel] = useState(null);
   const [paintState, setPaintState] = useState({ enabled: false });
@@ -353,6 +354,15 @@ export default function App() {
 
         <div className="viewport-area">
           <canvas id="viewport" ref={canvasRef} />
+
+          {!previewMode && (
+            <WorldModeBar
+              floating
+              worldMode={worldMode}
+              onSetWorldMode={selectWorldMode}
+              modeLocked={modeLocked}
+            />
+          )}
 
           <div id="help-card" className={helpVisible && studioLike ? '' : 'hidden'}>
             <div className="help-row"><span className="help-ic">🖐</span> Drag to pan</div>

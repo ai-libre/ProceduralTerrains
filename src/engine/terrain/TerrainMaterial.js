@@ -214,6 +214,12 @@ export function createTerrainUniforms() {
     uPaintHeightRange: { value: 180 },
     uPaintHeightTexture: { value: null },
     uPaintBiomeTexture: { value: null },
+    // Planet-mode baked height/normal cubemap (shared by the planet terrain +
+    // water shaders). When uUsePlanetHeightTex is 1, those shaders sample this
+    // texture instead of re-evaluating the ~46-octave height field per pixel.
+    // Ignored by the studio/infinite materials, which never declare them.
+    uPlanetHeightTex:    { value: null },
+    uUsePlanetHeightTex: { value: 0.0 },
     ...paletteUniforms,
   };
 }

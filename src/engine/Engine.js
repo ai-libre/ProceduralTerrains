@@ -9,6 +9,7 @@ import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
 import { CLOUD_QUALITY_PRESETS, CLOUD_LEGACY_PERF_KEYS } from './sky/CloudSettings.js';
 import { createPlanetMaterial, createPlanetWaterMaterial } from './terrain/PlanetMaterial.js';
 import { PlanetHeightSampler } from './terrain/PlanetHeightSampler.js';
+import { PlanetHeightBaker } from './terrain/PlanetHeightBaker.js';
 import { PlanetOrbitControls } from './PlanetOrbitControls.js';
 import { PlanetController } from './player/PlanetController.js';
 import { EditorControls } from './EditorControls.js';
@@ -126,6 +127,8 @@ export class Engine {
     this.planetControls = null;
     this.planetSampler = null;
     this.planetCloudLayer = null;
+    this.planetHeightBaker = null;   // bakes the static height field → cubemap
+    this._bakedTerrainGen = -1;      // terrain generation the cubemap was baked at
     this.planetFaceGrid = 8;
     this._compiledKeys = new Set();   // mode:octave shader sets already compiled
 
@@ -1236,6 +1239,29 @@ export class Engine {
     this._applyWaterPerf();
   }
 
+  /**
+   * Ensure the planet height/normal cubemap is baked and current. Re-bakes only
+   * when the terrain generation counter has advanced (seed / shape / biome
+   * edits), so a steady camera costs nothing. Until the first bake completes,
+   * uUsePlanetHeightTex stays 0 and the shaders fall back to the live field.
+   */
+  _ensurePlanetHeightTex() {
+    if (this.worldMode !== 'planet') return;
+    if (!this.planetHeightBaker) {
+      this.planetHeightBaker = new PlanetHeightBaker({
+        renderer: this.renderer,
+        uniforms: this.uniforms,
+        size: 1024,
+      });
+      this._bakedTerrainGen = -1;
+    }
+    if (this._bakedTerrainGen === this._terrainGen) return;
+    this.planetHeightBaker.bake(Math.round(this.params.octaves));
+    this.uniforms.uPlanetHeightTex.value = this.planetHeightBaker.texture;
+    this.uniforms.uUsePlanetHeightTex.value = 1.0;
+    this._bakedTerrainGen = this._terrainGen;
+  }
+
   _enterPlanetMode() {
     const p = this.params;
     // planet is fully procedural — Studio paint layers don't apply
@@ -1396,6 +1422,12 @@ export class Engine {
   _disposePlanet() {
     if (this.player) { this.player.dispose(); this.player = null; }
     if (this.planetCloudLayer) { this.planetCloudLayer.dispose(); this.planetCloudLayer = null; }
+    if (this.planetHeightBaker) { this.planetHeightBaker.dispose(); this.planetHeightBaker = null; }
+    // reset the shared cubemap uniforms so studio/infinite never sample a stale
+    // (or disposed) planet texture
+    this.uniforms.uPlanetHeightTex.value = null;
+    this.uniforms.uUsePlanetHeightTex.value = 0.0;
+    this._bakedTerrainGen = -1;
     if (this.planetWorld) { this.planetWorld.dispose(); this.planetWorld = null; }
     if (this.planetWater) {
       this.scene.remove(this.planetWater);
@@ -2055,6 +2087,10 @@ export class Engine {
         this.planetWorld.culledChunkCount
       );
     }
+
+    // refresh the baked height/normal cubemap if the field changed (no-op on a
+    // steady frame); the planet terrain + water shaders sample it per pixel.
+    this._ensurePlanetHeightTex();
 
     // planet renders straight to the canvas — no underwater render-target pass
     this.renderer.render(this.scene, this.camera);

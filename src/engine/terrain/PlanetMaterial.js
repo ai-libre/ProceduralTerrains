@@ -76,6 +76,8 @@ ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 uniform float uNormalStrength;
 uniform float uAO;
 uniform float uLodDebug;
+uniform samplerCube uPlanetHeightTex;
+uniform float uUsePlanetHeightTex;
 
 varying vec3  vDir;
 varying vec3  vWorldPos;
@@ -101,16 +103,29 @@ void main() {
   vec3 dA = normalize(dir + t1 * eps);
   vec3 dB = normalize(dir + t2 * eps);
 
-  float hC = heightAt3D(dir);
-  float hA = heightAt3D(dA);
-  float hB = heightAt3D(dB);
-
-  vec3 pC = dir * (uPlanetRadius + hC);
-  vec3 pA = dA  * (uPlanetRadius + hA);
-  vec3 pB = dB  * (uPlanetRadius + hB);
-
-  vec3 nGeo = normalize(cross(pA - pC, pB - pC));
-  if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
+  // Height + geometric normal. When the baked cubemap is active, one fetch
+  // replaces the centre height field and two more cover the neighbour heights
+  // used by the concavity AO term — versus three full ~46-octave evaluations.
+  // The branch is on a uniform, so it stays coherent across the warp (a real
+  // GPU saving, not just fewer ALU on paper).
+  float hC, hA, hB;
+  vec3 nGeo;
+  if (uUsePlanetHeightTex > 0.5) {
+    vec4 hT = textureCube(uPlanetHeightTex, dir);
+    hC = hT.a * uHeightScale;
+    nGeo = normalize(hT.rgb * 2.0 - 1.0);
+    hA = textureCube(uPlanetHeightTex, dA).a * uHeightScale;
+    hB = textureCube(uPlanetHeightTex, dB).a * uHeightScale;
+  } else {
+    hC = heightAt3D(dir);
+    hA = heightAt3D(dA);
+    hB = heightAt3D(dB);
+    vec3 pC = dir * (uPlanetRadius + hC);
+    vec3 pA = dA  * (uPlanetRadius + hA);
+    vec3 pB = dB  * (uPlanetRadius + hB);
+    nGeo = normalize(cross(pA - pC, pB - pC));
+    if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
+  }
 
   // normal-strength tweak: lean the geometric normal toward/away from up
   float up = clamp(dot(nGeo, dir), 0.0, 1.0);
@@ -227,6 +242,8 @@ uniform float uWaterQuality;
 uniform float uWaterDetail;
 uniform float uWaterReflection;
 uniform float uWaveComplexity;
+uniform samplerCube uPlanetHeightTex;
+uniform float uUsePlanetHeightTex;
 
 varying vec3 vDir;
 varying vec3 vWorldPos;
@@ -253,8 +270,14 @@ float rippleTri(vec3 p, vec3 blend, float t) {
 void main() {
   vec3 dir = normalize(vDir);
 
-  // ocean only where the terrain sits below sea level
-  float terrainR = uPlanetRadius + heightAt3D(dir);
+  // ocean only where the terrain sits below sea level. The baked height
+  // cubemap (when active) gives the sea-floor height in one fetch instead of
+  // re-evaluating the full per-pixel field — this is the bulk of the planet
+  // water shader's cost when the ocean fills the screen up close.
+  float terrainH = uUsePlanetHeightTex > 0.5
+    ? textureCube(uPlanetHeightTex, dir).a * uHeightScale
+    : heightAt3D(dir);
+  float terrainR = uPlanetRadius + terrainH;
   float waterR = uPlanetRadius + uSeaLevel;
   float depth = waterR - terrainR;
   if (depth <= 0.02) discard;

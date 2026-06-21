@@ -14,53 +14,57 @@ const PLAYER_STATE_LABELS = {
 export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats, qualityPreset, playerMode, playerState }) {
   return (
     <footer id="statusbar">
-      <div className="sb-group">
+      <div className="sb-group sb-group-primary">
         <span className={`status-dot${status.busy ? ' busy' : ''}`} />
-        <span>{status.text}</span>
-        <span className="sb-sep" />
-        <span>GPU: {gpu}</span>
+        <span className="sb-status">{status.text}</span>
+        <span className="sb-sep sb-desktop-only" aria-hidden="true" />
+        <span className="sb-desktop-only">GPU: {gpu}</span>
         {playerMode && playerState && (
           <>
-            <span className="sb-sep" />
-            <span className={`player-state player-state-${playerState}`}>
+            <span className="sb-sep sb-desktop-only" aria-hidden="true" />
+            <span className={`player-state player-state-${playerState} sb-desktop-only`}>
               {PLAYER_STATE_LABELS[playerState] ?? playerState}
             </span>
           </>
         )}
         {worldMode === 'infinite' && infiniteStats && (
           <>
-            <span className="sb-sep" />
-            <span>Visible: {infiniteStats.visibleChunks ?? infiniteStats.chunks} / {infiniteStats.chunks}</span>
-            <span className="sb-sep" />
-            <span>Speed: {infiniteStats.speed} u/s</span>
+            <span className="sb-sep sb-desktop-only" aria-hidden="true" />
+            <span className="sb-desktop-only">
+              Visible: {infiniteStats.visibleChunks ?? infiniteStats.chunks} / {infiniteStats.chunks}
+            </span>
+            <span className="sb-sep sb-desktop-only" aria-hidden="true" />
+            <span className="sb-desktop-only">Speed: {infiniteStats.speed} u/s</span>
             {qualityPreset && (
               <>
-                <span className="sb-sep" />
-                <span className="sb-quality">{qualityPreset}</span>
+                <span className="sb-sep sb-desktop-only" aria-hidden="true" />
+                <span className="sb-quality sb-desktop-only">{qualityPreset}</span>
               </>
             )}
           </>
         )}
         {worldMode === 'planet' && (
           <>
-            <span className="sb-sep" />
-            <span>Planet</span>
+            <span className="sb-sep sb-desktop-only" aria-hidden="true" />
+            <span className="sb-desktop-only">Planet</span>
             {infiniteStats && (
               <>
-                <span className="sb-sep" />
-                <span>Visible: {infiniteStats.visibleChunks} / {infiniteStats.chunks}</span>
+                <span className="sb-sep sb-desktop-only" aria-hidden="true" />
+                <span className="sb-desktop-only">
+                  Visible: {infiniteStats.visibleChunks} / {infiniteStats.chunks}
+                </span>
               </>
             )}
           </>
         )}
       </div>
-      <div className="sb-group">
-        <span>Triangles: {fmtTris(stats.triangles)}</span>
-        <span className="sb-sep" />
-        <span>Draw Calls: {stats.drawCalls}</span>
+      <div className="sb-group sb-group-stats">
+        <span className="sb-tris">Triangles: {fmtTris(stats.triangles)}</span>
+        <span className="sb-sep sb-desktop-only" aria-hidden="true" />
+        <span className="sb-desktop-only">Draw Calls: {stats.drawCalls}</span>
         <span className="sb-sep" />
         <span className={`fps-badge${stats.fps > 0 && stats.fps < 30 ? ' low' : ''}`}>{stats.fps} FPS</span>
-        <span className="sb-sep" />
+        <span className="sb-sep sb-desktop-only" aria-hidden="true" />
         <a
           className="sb-github-link"
           href={GITHUB_REPO_URL}

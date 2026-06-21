@@ -2702,15 +2702,36 @@ input[type="color"].palette-color-input {
 
   #statusbar {
     height: auto;
-    min-height: 24px;
+    min-height: 34px;
     flex: 0 0 auto;
-    gap: 8px;
-    padding: 4px max(8px, env(safe-area-inset-right)) 4px max(8px, env(safe-area-inset-left));
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px max(10px, env(safe-area-inset-right))
+      calc(6px + env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
+    overflow: hidden;
+    font-size: 10px;
   }
-  #statusbar::-webkit-scrollbar { display: none; }
-  .sb-group { flex: 0 0 auto; gap: 8px; }
+  .sb-desktop-only { display: none !important; }
+  .sb-group {
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: 8px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+  .sb-group-primary { flex: 1 1 auto; }
+  .sb-group-stats { flex: 0 0 auto; justify-content: flex-end; }
+  .sb-status {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 42vw;
+  }
+  .sb-tris { font-variant-numeric: tabular-nums; }
+  .fps-badge { flex-shrink: 0; }
+  .sb-github-link { flex-shrink: 0; }
 }
 
 @media (hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 520px) {
@@ -2740,4 +2761,7 @@ input[type="color"].palette-color-input {
 @media (max-width: 420px) {
   .viewport-mode-bar .mode-bar-btn { padding: 0 9px; font-size: 10px; }
   .toolbar-btn { flex-basis: 50px; min-width: 50px; }
+  #statusbar { gap: 6px; font-size: 9.5px; }
+  .sb-group { gap: 6px; }
+  .sb-status { max-width: 34vw; }
 }

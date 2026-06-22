@@ -117,7 +117,9 @@ void main() {
 
 #if defined(CLOUD_CHUNK) && CLOUD_CHUNK > 0
   // clip the marched range to this chunk's angular sector (4 origin planes),
-  // keeping stepLen/baseT (the global lattice) unchanged
+  // keeping stepLen/baseT (the global lattice) unchanged. Add a small overlap
+  // margin (chunkEps) to ensure no seams between adjacent chunks due to float precision.
+  float chunkEps = 0.05 * stepLen;
   for (int k = 0; k < 4; k++) {
     vec3 N = uCellNormals[k];
     float nro = dot(N, ro);
@@ -126,23 +128,23 @@ void main() {
       if (nro < 0.0) discard;            // ray runs parallel to and outside the plane
     } else {
       float tp = -nro / nrd;
-      if (nrd > 0.0) tStart = max(tStart, tp);
-      else           tEnd   = min(tEnd, tp);
+      if (nrd > 0.0) tStart = max(tStart, tp - chunkEps);
+      else           tEnd   = min(tEnd, tp + chunkEps);
     }
   }
   if (tEnd <= tStart) discard;
 #endif
 
-  // first global-lattice sample at or after this (clipped) range start
-  float n0 = max(0.0, ceil((tStart - baseT) / stepLen));
-  float t = baseT + n0 * stepLen;
-
   float transmittance = 1.0;
   vec3 scatter = vec3(0.0);
   vec3 ambient = uCloudShadowColor * uCloudShadowStrength;
 
+#if defined(CLOUD_CHUNK) && CLOUD_CHUNK > 0
+  // chunk mode (experimental): uniform global lattice so adjacent chunks share
+  // sample positions. Kept for the opt-in chunked path.
+  float n0 = max(0.0, ceil((tStart - baseT) / stepLen));
+  float t = baseT + n0 * stepLen;
   for (int i = 0; i < CLOUD_STEPS; i++) {
-    // conditional (not a break) keeps the loop bound static for the compiler
     if (t < tEnd && transmittance > 0.01) {
       vec3 P = ro + rd * t;
       float dens = cloudDensity(P);
@@ -156,6 +158,38 @@ void main() {
     }
     t += stepLen;
   }
+#else
+  // single-shell mode (default): ADAPTIVE empty-space skipping. Stride through
+  // empty shell with a coarse step; once density is found, step back to the
+  // previous coarse sample and refine at stepLen so the cloud's leading edge is
+  // never overshot (no banding). The step budget concentrates where there is
+  // actually cloud — a big win for scattered skies — with no seams (one mesh).
+  float coarse = stepLen * 2.0;
+  float t = baseT;
+  bool refining = false;
+  for (int i = 0; i < CLOUD_STEPS; i++) {
+    if (t < tEnd && transmittance > 0.01) {
+      vec3 P = ro + rd * t;
+      float dens = cloudDensity(P);
+      if (!refining && dens > 0.001) {
+        // entered a cloud on a coarse stride: drop back and switch to fine steps
+        refining = true;
+        t = max(baseT, t - coarse);
+      } else if (refining) {
+        if (dens > 0.001) {
+          float light = uCloudSelfShadow > 0.5 ? cl_lightTransmittance(P) : 1.0;
+          vec3 lit = mix(ambient, uCloudColor, light) * (0.55 + 0.45 * uCloudScattering * light);
+          float dT = exp(-dens * stepLen * uCloudExtinction);
+          scatter += transmittance * (1.0 - dT) * lit;
+          transmittance *= dT;
+        }
+        t += stepLen;
+      } else {
+        t += coarse;   // still in empty space — keep striding
+      }
+    }
+  }
+#endif
 
   float alpha = 1.0 - transmittance;
   if (alpha < 0.004) discard;

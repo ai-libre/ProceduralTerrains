@@ -234,11 +234,13 @@ export class PlanetWorld {
     }
   }
 
-  update(cameraPos, camera) {
+  update(cameraPos, camera, debug = {}) {
     this._processLodRebuild();
 
     const [t0, t1, t2] = this.lodThresholds;
     const counts = [0, 0, 0, 0];
+    const freezeCulling = !!debug.freezeCulling;
+    const freezeLod = !!debug.freezeLod;
 
     // camera direction from planet center + altitude drive the horizon test.
     // A surface point at direction d is above the horizon when
@@ -251,7 +253,7 @@ export class PlanetWorld {
     const margin = 0.08 + (1 - this.cullingAggressiveness) * 0.10;
     const horizonCos = base - margin;
 
-    if (camera) {
+    if (!freezeCulling && camera) {
       this._projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
       this._frustum.setFromProjectionMatrix(this._projView);
     }
@@ -260,17 +262,22 @@ export class PlanetWorld {
     for (const c of this.chunks) {
       const d = this._tmp.copy(c.worldCenter).sub(cameraPos).length();
       const lod = d < t0 ? 0 : d < t1 ? 1 : d < t2 ? 2 : 3;
-      if (lod !== c.lod) { c.lod = lod; c.mesh.geometry = this.geometries[lod]; }
-      counts[lod]++;
+      if (!freezeLod) {
+        if (lod !== c.lod) { c.lod = lod; c.mesh.geometry = this.geometries[lod]; }
+      }
+      counts[c.lod]++;
 
-      let show = true;
-      if (this.cullingEnabled) {
-        if (this.horizonCulling && camLen > this.radius) {
-          if (this._camDir.dot(c.centerDir) < horizonCos) show = false;
-        }
-        if (show && camera) {
-          if (!this._frustum.intersectsSphere(_sphere.set(c.worldCenter, c.boundRadius))) {
-            show = false;
+      let show = c.mesh.visible;
+      if (!freezeCulling) {
+        show = true;
+        if (this.cullingEnabled) {
+          if (this.horizonCulling && camLen > this.radius) {
+            if (this._camDir.dot(c.centerDir) < horizonCos) show = false;
+          }
+          if (show && camera) {
+            if (!this._frustum.intersectsSphere(_sphere.set(c.worldCenter, c.boundRadius))) {
+              show = false;
+            }
           }
         }
       }

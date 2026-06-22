@@ -307,14 +307,19 @@ export class PlanetCloudChunks {
   }
 
   // ---- per-frame: animate (shared, once) + cull + LOD (per chunk)
-  update(dt, cameraPos, sunDir, camera, planetWorld) {
+  update(dt, cameraPos, sunDir, camera, planetWorld, debug = {}) {
     if (!this._enabled) {
       if (this.group.visible) this.group.visible = false;
       return;
     }
+    const freezeCulling = !!debug.freezeCulling;
+    const freezeLod = !!debug.freezeLod;
+
     const dist = cameraPos.length();
-    this._inRange = dist <= this._maxDistance;
-    this.group.visible = this._inRange;
+    if (!freezeCulling) {
+      this._inRange = dist <= this._maxDistance;
+      this.group.visible = this._inRange;
+    }
     if (!this._inRange) return;
 
     const u = this.shared;
@@ -324,16 +329,18 @@ export class PlanetCloudChunks {
     if (sunDir) u.uCloudSunDir.value.copy(sunDir);
 
     // step-LOD ramp (shared scalar updated once globally so all chunks share the same lattice)
-    const near = this.planetRadius;
-    const far = this._maxDistance;
-    if (this._stepLOD && Number.isFinite(far)) {
-      const f = far > near ? (dist - near) / (far - near) : 0;
-      u.uCloudStepScale.value = Math.max(0.4, Math.min(1.0, 1.0 - f * 0.6));
-    } else {
-      u.uCloudStepScale.value = 1.0;
+    if (!freezeLod) {
+      const near = this.planetRadius;
+      const far = this._maxDistance;
+      if (this._stepLOD && Number.isFinite(far)) {
+        const f = far > near ? (dist - near) / (far - near) : 0;
+        u.uCloudStepScale.value = Math.max(0.4, Math.min(1.0, 1.0 - f * 0.6));
+      } else {
+        u.uCloudStepScale.value = 1.0;
+      }
     }
 
-    if (camera) {
+    if (!freezeCulling && camera) {
       this._projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
       this._frustum.setFromProjectionMatrix(this._projView);
     }
@@ -364,39 +371,43 @@ export class PlanetCloudChunks {
     let visible = 0, culled = 0;
     const counts = [0, 0, 0, 0];
     for (const ch of this.chunks) {
-      if (evalCover) ch.covered = this._sectorCovered(ch, midR, field);
+      if (!freezeCulling) {
+        if (evalCover) ch.covered = this._sectorCovered(ch, midR, field);
 
-      let show = true;
-      if (planetWorld && ch.terrainChunks && ch.terrainChunks.length > 0) {
-        let anyVisible = false;
-        for (const tc of ch.terrainChunks) {
-          if (tc.mesh.visible) {
-            anyVisible = true;
-            break;
+        let show = true;
+        if (planetWorld && ch.terrainChunks && ch.terrainChunks.length > 0) {
+          let anyVisible = false;
+          for (const tc of ch.terrainChunks) {
+            if (tc.mesh.visible) {
+              anyVisible = true;
+              break;
+            }
           }
-        }
-        show = anyVisible;
-        
-        // Safety check for surface view: if terrain thinks it's culled,
-        // double check if the cloud's own bounding sphere actually intersects the frustum.
-        if (!show && camLen <= this.planetRadius * 1.05 && camera) {
-          if (this._frustum.intersectsSphere(_sphere.set(ch.worldCenter, ch.boundRadius))) {
-            show = true;
+          show = anyVisible;
+          
+          // Safety check for surface view: if terrain thinks it's culled,
+          // double check if the cloud's own bounding sphere actually intersects the frustum.
+          if (!show && camLen <= this.planetRadius * 1.05 && camera) {
+            if (this._frustum.intersectsSphere(_sphere.set(ch.worldCenter, ch.boundRadius))) {
+              show = true;
+            }
           }
+        } else {
+          // Fallback to standard cloud-only culling logic
+          show = ch.covered;
+          if (show && camLen > this.planetRadius && this._camDir.dot(ch.centerDir) < horizonCos) show = false;
+          if (show && camera && !this._frustum.intersectsSphere(_sphere.set(ch.worldCenter, ch.boundRadius))) show = false;
         }
-      } else {
-        // Fallback to standard cloud-only culling logic
-        show = ch.covered;
-        if (show && camLen > this.planetRadius && this._camDir.dot(ch.centerDir) < horizonCos) show = false;
-        if (show && camera && !this._frustum.intersectsSphere(_sphere.set(ch.worldCenter, ch.boundRadius))) show = false;
+
+        ch.mesh.visible = show;
       }
-
-      ch.mesh.visible = show;
-      if (show) { visible++; counts[0]++; } else culled++;
+      if (ch.mesh.visible) { visible++; counts[0]++; } else culled++;
     }
     this.visibleChunkCount = visible;
     this.culledChunkCount = culled;
-    this.group.visible = this._inRange && visible > 0;
+    if (!freezeCulling) {
+      this.group.visible = this._inRange && visible > 0;
+    }
     this.lodCounts = counts;
   }
 

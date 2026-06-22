@@ -1098,15 +1098,18 @@ export class Engine {
   // ---------------------------------------------------------------- debug
   getDebugFlags() { return { ...this._debug }; }
 
-  /** Toggle a developer debug switch (see this._debug). */
   setDebugFlag(key, value) {
     if (!(key in this._debug)) return;
     this._debug[key] = !!value;
     this._needsRender = true;
     if (key === 'disableHeightBake') {
       // off → drop to the live field immediately; on → force a fresh bake next tick
-      if (this._debug.disableHeightBake) this.uniforms.uUseTerrainHeightTex.value = 0.0;
+      if (this._debug.disableHeightBake) {
+        this.uniforms.uUseTerrainHeightTex.value = 0.0;
+        this.uniforms.uUsePlanetHeightTex.value = 0.0;
+      }
       this._bakedStudioGen = -1;
+      this._bakedTerrainGen = -1;
     }
   }
 
@@ -1475,6 +1478,7 @@ export class Engine {
     this.planetWorld.setWireframe(p.wireframe);
     this.planetWorld.setTriangleBudget(this.perf.triangleBudget);
     this.planetWorld.cullingAggressiveness = this.perf.cullingAggressiveness;
+    this.planetWorld.cullingEnabled = this.cullingEnabled;
 
     // water shell: a sphere at radius (planetRadius + seaLevel); the shader
     // discards over land so only basins fill. One mesh, one shared material.
@@ -1496,6 +1500,10 @@ export class Engine {
    */
   _ensurePlanetHeightTex() {
     if (this.worldMode !== 'planet') return;
+    if (this._debug.disableHeightBake) {
+      this.uniforms.uUsePlanetHeightTex.value = 0.0;
+      return;
+    }
     if (!this.planetHeightBaker) {
       this.planetHeightBaker = new PlanetHeightBaker({
         renderer: this.renderer,
@@ -1566,8 +1574,8 @@ export class Engine {
 
     this._buildPlanetWorld();
 
-    // volumetric cloud shell (either chunked with culling, or seamless single-mesh)
-    if (p.cloudChunksEnabled !== false) {
+    // volumetric cloud shell (seamless single-mesh by default; chunked is opt-in)
+    if (p.cloudChunksEnabled === true) {
       this.planetCloudChunks = new PlanetCloudChunks(this.scene, {
         planetRadius: this._planetRadius(),
         faceGrid: 4,
@@ -1616,7 +1624,7 @@ export class Engine {
    *  its own world mode. */
   _applyCloudSettings() {
     if (this.worldMode === 'planet') {
-      const wantChunks = this.params.cloudChunksEnabled !== false;
+      const wantChunks = this.params.cloudChunksEnabled === true;
       if (wantChunks && !this.planetCloudChunks) {
         if (this.planetCloudLayer) {
           this.planetCloudLayer.dispose();
@@ -1947,6 +1955,9 @@ export class Engine {
     this.board.cullingEnabled = enabled;
     if (this.infiniteWorld) {
       this.infiniteWorld.cullingEnabled = enabled;
+    }
+    if (this.planetWorld) {
+      this.planetWorld.cullingEnabled = enabled;
     }
   }
 
@@ -2408,9 +2419,9 @@ export class Engine {
       this.planetControls.update(dt);
     }
 
-    if (this.planetWorld) this.planetWorld.update(this.camera.position, this.camera);
+    if (this.planetWorld) this.planetWorld.update(this.camera.position, this.camera, this._debug);
     if (this.planetCloudChunks) {
-      this.planetCloudChunks.update(dt, this.camera.position, this.uniforms.uSunDir.value, this.camera, this.planetWorld);
+      this.planetCloudChunks.update(dt, this.camera.position, this.uniforms.uSunDir.value, this.camera, this.planetWorld, this._debug);
     }
     if (this.planetCloudLayer) {
       this.planetCloudLayer.update(dt, this.camera.position, this.uniforms.uSunDir.value);

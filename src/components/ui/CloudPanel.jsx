@@ -38,11 +38,12 @@ const LIGHT_SLIDERS = [
   { key: 'cloudScatteringStrength', label: 'Scattering', min: 0, max: 2, step: 0.05, digits: 2, info: 'Brightness of light scattered toward the camera.' },
 ];
 
-const QUALITY_OPTIONS = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'ultra', label: 'Ultra' },
+const RESOLUTION_OPTIONS = [
+  { value: 'low', label: 'Low (8 steps)' },
+  { value: 'medium', label: 'Medium (12 steps)' },
+  { value: 'quality', label: 'Quality (16 steps)' },
+  { value: 'high', label: 'High (24 steps)' },
+  { value: 'ultra', label: 'Ultra (48 steps)' },
   { value: 'custom', label: 'Custom' },
 ];
 
@@ -70,7 +71,21 @@ export default function CloudPanel({ params, onParam, perf, onPerfSetting, onClo
   // Quality / performance knobs are owned by the centralized perf settings —
   // these read/write `perf` so the Performance tab and this panel stay in sync.
   const p = perf ?? {};
-  const qualityName = perf ? matchCloudQualityName(perf) : 'high';
+  const currentSteps = p.cloudSteps ?? 12;
+  let resolutionName = 'custom';
+  if (currentSteps === 8) resolutionName = 'low';
+  else if (currentSteps === 12) resolutionName = 'medium';
+  else if (currentSteps === 16) resolutionName = 'quality';
+  else if (currentSteps === 24) resolutionName = 'high';
+  else if (currentSteps === 48) resolutionName = 'ultra';
+
+  const handleResolutionChange = (v) => {
+    if (v === 'low') onPerfSetting('cloudSteps', 8);
+    else if (v === 'medium') onPerfSetting('cloudSteps', 12);
+    else if (v === 'quality') onPerfSetting('cloudSteps', 16);
+    else if (v === 'high') onPerfSetting('cloudSteps', 24);
+    else if (v === 'ultra') onPerfSetting('cloudSteps', 48);
+  };
 
   const content = (
     <>
@@ -83,14 +98,6 @@ export default function CloudPanel({ params, onParam, perf, onPerfSetting, onClo
 
       {enabled && (
         <>
-          {worldMode === 'planet' && (
-            <ToggleRow
-              label="Chunked Clouds"
-              value={val(params, 'cloudChunksEnabled')}
-              onChange={(v) => onParam('cloudChunksEnabled', v)}
-              info="Divide clouds into sector chunks with terrain culling. Disable for a seamless single-mesh fallback."
-            />
-          )}
           <div className="subsection-label">Shape</div>
           {SHAPE_SLIDERS.map((def) => (
             <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} />
@@ -142,11 +149,11 @@ export default function CloudPanel({ params, onParam, perf, onPerfSetting, onClo
 
           <div className="subsection-label">Performance</div>
           <SelectRow
-            label="Quality"
-            value={qualityName}
-            options={QUALITY_OPTIONS}
-            onChange={(v) => v !== 'custom' && onCloudQuality(v)}
-            info="Raymarch step count. Higher = smoother clouds, lower FPS. Shared with Performance settings (fine-tune there)."
+            label="Resolution"
+            value={resolutionName}
+            options={RESOLUTION_OPTIONS}
+            onChange={handleResolutionChange}
+            info="Raymarch step count. Higher = smoother clouds, lower FPS. Shared with Performance settings."
           />
           <SelectRow
             label="Fallback Mode"

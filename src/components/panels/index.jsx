@@ -340,7 +340,7 @@ function DebugPanel({ ctx }) {
   return (
     <SidePanel title="Debug" description="Live stats and diagnostics." onClose={ctx.onClose}>
       <PerformanceStats stats={ctx.stats} gpu={ctx.gpu} />
-      {ctx.worldMode !== 'planet' && (
+      {ctx.worldMode !== 'infinite' && (
         <LodPanel
           lodCounts={ctx.lodCounts} chunkCount={ctx.chunkCount}
           visibleChunks={ctx.visibleChunks} culledChunks={ctx.culledChunks}
@@ -407,7 +407,7 @@ function DebugOptions({ ctx }) {
       <div className="panel-group">
         <div className="panel-group-header"><span className="panel-group-title">DIAGNOSTICS</span></div>
         <div className="panel-group-body">
-          {isStudio ? (
+          {isStudio || worldMode === 'planet' ? (
             <>
               <ToggleRow label="Freeze Culling" value={!!flags.freezeCulling} onChange={(v) => setFlag('freezeCulling', v)}
                 info="Stop recomputing chunk visibility. Freeze, then orbit out to inspect the culling frustum from outside." />
@@ -416,10 +416,12 @@ function DebugOptions({ ctx }) {
               <ToggleRow label="Force Render" value={!!flags.forceRender} onChange={(v) => setFlag('forceRender', v)}
                 info="Bypass on-demand rendering and draw every frame (use to read true sustained FPS)." />
               <ToggleRow label="Disable Height Bake" value={!!flags.disableHeightBake} onChange={(v) => setFlag('disableHeightBake', v)}
-                info="Force the live per-pixel height field instead of the baked texture — A/B the studio render optimization." />
+                info={isStudio
+                  ? "Force the live per-pixel height field instead of the baked texture — A/B the studio render optimization."
+                  : "Force the live per-pixel height field instead of the baked cubemap — A/B the planet render optimization."} />
             </>
           ) : (
-            <p className="section-hint">Freeze / render diagnostics apply to Tile mode.</p>
+            <p className="section-hint">Freeze / render diagnostics apply to Tile or Planet mode.</p>
           )}
         </div>
       </div>

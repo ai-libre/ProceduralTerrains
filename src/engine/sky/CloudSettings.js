@@ -21,7 +21,11 @@
 // CLOUD_LEGACY_PERF_KEYS below for migration of old saves.
 export const CLOUD_DEFAULT_PARAMS = {
   cloudsEnabled: false,
-  cloudChunksEnabled: true,
+  // Chunked cloud shell is experimental (off by default): splitting a volumetric
+  // raymarch across cube-face sector meshes leaves visible seam lines at the
+  // sector/face boundaries. The default is the seamless single-shell mesh with
+  // in-shader empty-space skipping (same perf intent, no seams).
+  cloudChunksEnabled: false,
 
   // shape / coverage
   cloudCoverage: 0.50,        // 0..1 — fraction of sky covered (higher = more)

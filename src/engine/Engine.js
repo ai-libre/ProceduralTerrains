@@ -41,6 +41,9 @@ import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainP
 import { PaintModeManager } from '../paint/PaintModeManager.js';
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 
+const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
+const DEFAULT_IMPORT_SETTINGS = { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
+
 // ============================================================================
 // Terrain Studio engine. Framework-agnostic: owns the renderer/scene, the
 // single fixed terrain board, shared shader uniforms and camera controls.
@@ -177,6 +180,10 @@ export class Engine {
 
     // Developer debug switches (Debug panel). None of these persist — they are
     // pure inspection aids that never touch saved projects or perf settings.
+    this.tileDebug = { view: 'off', showLegend: true, opacity: 1, showPreview: true };
+    this.importedMaps = { noise: null, height: null, biome: null };
+    this.importedMapState = { noise: null, height: null, biome: null };
+
     this._debug = {
       freezeCulling: false,   // stop recomputing chunk visibility (fly out to inspect the frustum)
       freezeLod: false,       // stop recomputing per-chunk LOD
@@ -344,6 +351,113 @@ export class Engine {
   // ------------------------------------------------------------ parameters
 
   get boardSize() { return this.params.chunkCount * this.params.chunkSize; }
+
+  setTileDebug(next = {}) {
+    this.tileDebug = { ...this.tileDebug, ...next };
+    const mode = this.tileDebug.view === 'noise' ? 1 : this.tileDebug.view === 'height' ? 2 : this.tileDebug.view === 'biome' ? 3 : 0;
+    this.uniforms.uTileDebugView.value = this.worldMode === 'studio' ? mode : 0;
+    this._needsRender = true;
+    this.cb.onTileDebug?.({ ...this.tileDebug });
+  }
+
+  async importTileMap(type, file) {
+    const okTypes = ['image/png', 'image/jpeg', 'image/webp'];
+    if (!file || !okTypes.includes(file.type)) {
+      const error = 'Unsupported file type. Use PNG, JPG, or WebP.';
+      this._setImportState(type, { error });
+      this.cb.onToast(error);
+      return;
+    }
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.decoding = 'async';
+      await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = url; });
+      const warning = img.width > 4096 || img.height > 4096 ? 'Large image imported; processing was downscaled for performance.' : '';
+      const maxSide = 4096;
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0, w, h);
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const preview = canvas.toDataURL('image/png');
+      URL.revokeObjectURL(url);
+      const previous = this.importedMaps[type];
+      if (previous?.texture) previous.texture.dispose();
+      this.importedMaps[type] = { fileName: file.name, width: w, height: h, originalWidth: img.width, originalHeight: img.height, imageData, preview, settings: { ...DEFAULT_IMPORT_SETTINGS } };
+      this._rebuildImportedTexture(type);
+      this.cb.onToast(`${type[0].toUpperCase() + type.slice(1)} map imported`);
+      if (warning) this.cb.onToast(warning);
+    } catch (e) {
+      console.error(e);
+      const error = 'Image failed to load or contains invalid image data.';
+      this._setImportState(type, { error });
+      this.cb.onToast(error);
+    }
+  }
+
+  setTileMapSetting(type, key, value) {
+    const entry = this.importedMaps[type];
+    if (!entry) { this._setImportState(type, { error: 'Import a map before enabling this mode.' }); return; }
+    entry.settings[key] = value;
+    if (key === 'invert' || key === 'normalize') this._rebuildImportedTexture(type);
+    this._syncImportedMapUniforms();
+    this._setImportState(type);
+    this.applyAll({ force: false });
+  }
+
+  _setImportState(type, patch = {}) {
+    const entry = this.importedMaps[type];
+    this.importedMapState = { ...this.importedMapState, [type]: entry ? { fileName: entry.fileName, width: entry.width, height: entry.height, preview: entry.preview, settings: { ...entry.settings }, warning: entry.originalWidth > 4096 || entry.originalHeight > 4096 ? 'Large image downscaled for processing.' : '', ...patch } : { ...patch } };
+    this.cb.onImportedMaps?.(this.importedMapState);
+  }
+
+  _rebuildImportedTexture(type) {
+    const entry = this.importedMaps[type];
+    if (!entry) return;
+    const data = entry.imageData.data;
+    let min = 1, max = 0;
+    const vals = new Float32Array(entry.width * entry.height);
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+      let v = (data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722) / 255;
+      if (entry.settings.invert) v = 1 - v;
+      vals[p] = v; min = Math.min(min, v); max = Math.max(max, v);
+    }
+    const out = new Uint8Array(entry.width * entry.height * 4);
+    for (let p = 0; p < vals.length; p++) {
+      let v = vals[p];
+      if (entry.settings.normalize && max > min) v = (v - min) / (max - min);
+      const b = Math.max(0, Math.min(255, Math.round(v * 255)));
+      out[p * 4] = out[p * 4 + 1] = out[p * 4 + 2] = b; out[p * 4 + 3] = 255;
+    }
+    entry.texture?.dispose();
+    entry.texture = new THREE.DataTexture(out, entry.width, entry.height, THREE.RGBAFormat);
+    entry.texture.colorSpace = THREE.NoColorSpace;
+    entry.texture.wrapS = entry.texture.wrapT = THREE.ClampToEdgeWrapping;
+    entry.texture.minFilter = entry.texture.magFilter = THREE.LinearFilter;
+    entry.texture.needsUpdate = true;
+    this._syncImportedMapUniforms();
+    this._setImportState(type);
+  }
+
+  _syncImportedMapUniforms() {
+    for (const type of ['noise', 'height', 'biome']) {
+      const e = this.importedMaps[type];
+      const cap = type[0].toUpperCase() + type.slice(1);
+      this.uniforms[`uImport${cap}Tex`].value = e?.texture ?? null;
+      this.uniforms[`uImport${cap}Mode`].value = e ? (IMPORT_MODES[e.settings.mode] ?? 0) : 0;
+      if (this.uniforms[`uImport${cap}Blend`]) this.uniforms[`uImport${cap}Blend`].value = e?.settings.blend ?? 1;
+    }
+    const h = this.importedMaps.height;
+    this.uniforms.uImportHeightStrength.value = h?.settings.heightStrength ?? 1;
+    this.uniforms.uImportHeightOffset.value = h?.settings.heightOffset ?? 0;
+    this._bakedStudioGen = -1;
+    this._terrainGen++;
+    this._needsRender = true;
+  }
 
   setParam(key, value) {
     this.params[key] = value;
@@ -780,6 +894,7 @@ export class Engine {
     this._terrainGen++;   // height field may have changed — refresh collision tile
     const p = this.params;
     const u = this.uniforms;
+    this._syncImportedMapUniforms();
     const size = this.boardSize;
 
     const rng = mulberry32(p.seed >>> 0);
@@ -1267,6 +1382,7 @@ export class Engine {
     else if (prev === 'planet') this._disposePlanet();
 
     this.worldMode = mode;
+    this.uniforms.uTileDebugView.value = mode === 'studio' ? (this.tileDebug.view === 'noise' ? 1 : this.tileDebug.view === 'height' ? 2 : this.tileDebug.view === 'biome' ? 3 : 0) : 0;
     this._terrainGen++;   // uFrequency / falloff change with the mode
     // The new mode's materials need their own underwater RT-variant programs;
     // re-arm the lazy warm so they compile on first approach to water (three's
@@ -2166,7 +2282,7 @@ export class Engine {
         await PlanetExporter.export(this.renderer, this.params, this.uniforms, options, onMsg);
       } else {
         await TerrainExporter.export(
-          this.renderer, this.params, this.uniforms, this.boardSize, options, onMsg
+          this.renderer, this.params, this.uniforms, this.boardSize, options, onMsg, this._stackGLSL
         );
       }
     } catch (e) {
@@ -2486,6 +2602,7 @@ export class Engine {
   }
 
   dispose() {
+    for (const entry of Object.values(this.importedMaps || {})) entry?.texture?.dispose();
     if (this._disposed) return;
     this._disposed = true;
     this._resizeObserver.disconnect();

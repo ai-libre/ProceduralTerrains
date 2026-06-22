@@ -44,6 +44,24 @@ uniform vec4  uLayerParamsB[MAX_NOISE_LAYERS];
 uniform vec4  uLayerMaskA[MAX_NOISE_LAYERS];    // height mask (min,max,falloff,flags)
 uniform vec4  uLayerMaskB[MAX_NOISE_LAYERS];    // noise mask (scale,threshold,soft,invert)
 uniform float uNoiseDebug;                      // debug view selector (0 = off)
+uniform float uTileDebugView;                   // 0 off, 1 noise, 2 height, 3 biome
+uniform sampler2D uImportNoiseTex;
+uniform sampler2D uImportHeightTex;
+uniform sampler2D uImportBiomeTex;
+uniform float uImportNoiseMode;                 // 0 disabled/preview, 2 replace, 3 blend
+uniform float uImportHeightMode;
+uniform float uImportBiomeMode;
+uniform float uImportNoiseBlend;
+uniform float uImportHeightBlend;
+uniform float uImportHeightStrength;
+uniform float uImportHeightOffset;
+uniform float uImportBiomeBlend;
+
+vec2 tileUvAt(vec2 xz) { return xz / (2.0 * uBoardHalf) + vec2(0.5); }
+float importedMapValue(sampler2D tex, vec2 uv) {
+  vec3 c = texture2D(tex, clamp(uv, 0.0, 1.0)).rgb;
+  return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
 `;
 
 // Baked studio height/normal texture sampling. Studio terrain + water fragment
@@ -219,7 +237,14 @@ ${stackBody2D}
 
 // Finalize: island falloff (studio board only) + clamp + world height scale.
 float shapeHeight(vec2 xz, Climate c) {
-  float h = stackHeight2D(xz, c);
+  float proceduralH = stackHeight2D(xz, c);
+  float h = proceduralH;
+#ifndef INFINITE_MODE
+  if (uImportNoiseMode > 1.5) {
+    float importedNoise = importedMapValue(uImportNoiseTex, tileUvAt(xz)) * uAmplitude;
+    h = (uImportNoiseMode > 2.5) ? mix(proceduralH, importedNoise, uImportNoiseBlend) : importedNoise;
+  }
+#endif
 #ifndef INFINITE_MODE
   // island/continent falloff toward board edges (square+radial blend)
   vec2 e = abs(xz) / uBoardHalf;
@@ -227,7 +252,14 @@ float shapeHeight(vec2 xz, Climate c) {
   float t = clamp((1.0 - edge) / max(uFalloff, 1e-3), 0.0, 1.0);
   h *= t * t * (3.0 - 2.0 * t);
 #endif
-  return clamp(h, 0.0, 1.35) * uHeightScale;
+  float finalH = clamp(h, 0.0, 1.35) * uHeightScale;
+#ifndef INFINITE_MODE
+  if (uImportHeightMode > 1.5) {
+    float importedH = importedMapValue(uImportHeightTex, tileUvAt(xz)) * uHeightScale * uImportHeightStrength + uImportHeightOffset;
+    finalH = (uImportHeightMode > 2.5) ? mix(finalH, importedH, uImportHeightBlend) : importedH;
+  }
+#endif
+  return finalH;
 }
 
 vec2 paintUvAt(vec2 xz) {

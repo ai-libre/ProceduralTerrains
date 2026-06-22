@@ -16,6 +16,7 @@ import MinimapOverlay from './components/MinimapOverlay.jsx';
 import PaintPanel from './components/paint/PaintPanel.jsx';
 import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
 import ToastContainer, { classifyToast } from './components/ui/Toast.jsx';
+import { useLanding } from './landing/landingContext.jsx';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 
@@ -26,6 +27,9 @@ export default function App() {
   const engineRef = useRef(null);
 
   const loading = useLoading();
+  const landing = useLanding();
+  const landingRef = useRef(landing);
+  landingRef.current = landing;
   const loadingRef = useRef(loading);
   loadingRef.current = loading;
 
@@ -87,6 +91,9 @@ export default function App() {
       canvas: canvasRef.current,
       minimapBase: minimapBaseRef.current,
       minimapOverlay: minimapOverlayRef.current,
+      initialParams: landingRef.current?.sessionSeed != null
+        ? { seed: landingRef.current.sessionSeed }
+        : undefined,
       callbacks: {
         onParams: (next) => {
           setParams({
@@ -102,6 +109,7 @@ export default function App() {
           if (!busy && !bootedRef.current) {
             bootedRef.current = true;
             loadingRef.current.done('boot');
+            landingRef.current?.setBootReady(true);
           }
         },
         onStats: setStats,
@@ -136,6 +144,9 @@ export default function App() {
     engine.setBehindCameraCulling(behindCameraCulling);
     engineRef.current = engine;
     setGpu(engine.gpuName);
+    if (landingRef.current?.visible && !landingRef.current?.exiting) {
+      engine.setLandingShowcase(true);
+    }
     if (import.meta.env.DEV) window.terrainStudio = engine;
     // safety: never leave the boot overlay stuck, but do not reveal the canvas
     // while the first studio frame is still being compiled/prepared.
@@ -144,6 +155,7 @@ export default function App() {
       if (!bootedRef.current && (!e || e._disposed || (!e._bootPending && !e._compiling))) {
         bootedRef.current = true;
         loadingRef.current.done('boot');
+        landingRef.current?.setBootReady(true);
       }
     }, 30000);
     return () => { clearTimeout(bootTimer); engine.dispose(); };
@@ -309,11 +321,21 @@ export default function App() {
 
   const block = blockingTask(loading.tasks);
   const nonBlock = nonBlockingTask(loading.tasks);
+  const showBlockingOverlay = block && !landing?.visible;
 
   useLayoutEffect(() => {
     if (!showStudioUI || !isStudio || !engineRef.current) return;
     engineRef.current.setMinimapCanvases(minimapBaseRef.current, minimapOverlayRef.current);
   }, [showStudioUI, isStudio, effectivePanel]);
+
+  const landingMode = landing?.visible;
+  const landingActive = landing?.visible && !landing?.exiting;
+
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    eng.setLandingShowcase(landingActive);
+  }, [landingActive]);
 
   const ctx = {
     params, worldMode, onParam,
@@ -347,7 +369,7 @@ export default function App() {
   };
 
   return (
-    <div id="app" className={`${previewMode ? 'preview-mode' : ''} ${fpsView ? 'infinite-mode fps-explore-mode' : ''}${effectivePanel ? ' side-drawer-open' : ''}`}>
+    <div id="app" className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''} ${fpsView ? 'infinite-mode fps-explore-mode' : ''}${effectivePanel ? ' side-drawer-open' : ''}`}>
       <TopBar
         previewMode={previewMode}
         worldMode={worldMode}
@@ -439,7 +461,7 @@ export default function App() {
             </>
           )}
 
-          {block && <LoadingOverlay task={block} />}
+          {showBlockingOverlay && <LoadingOverlay task={block} />}
         </div>
 
         {showToolPanels && (

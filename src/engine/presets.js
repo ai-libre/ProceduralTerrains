@@ -12,7 +12,7 @@ export const DEFAULT_PARAMS = {
 
   // height
   heightScale: 560,        // world units (displayed as m)
-  seaLevel: 42,
+  seaLevel: 100,
 
   // noise stack
   noiseScale: 45,          // feature scale (bigger = more features across board)
@@ -22,7 +22,7 @@ export const DEFAULT_PARAMS = {
   lacunarity: 2.05,
   ridge: 0.65,             // ridged mountain intensity
   warp: 0.9,               // domain warp strength
-  falloff: 0.5,            // island edge falloff
+  falloff: 0.2,            // island edge falloff
 
   // biome
   moistScale: 1.0,

@@ -84,10 +84,10 @@ const SHAPE_KEYS = new Set([
 const REBUILD_KEYS = new Set(['chunkCount', 'chunkSize']);
 
 export class Engine {
-  constructor({ canvas, minimapBase, minimapOverlay, callbacks }) {
+  constructor({ canvas, minimapBase, minimapOverlay, callbacks, initialParams }) {
     this.canvas = canvas;
     this.cb = callbacks;
-    this.params = { ...DEFAULT_PARAMS };
+    this.params = { ...DEFAULT_PARAMS, ...initialParams };
     // Live Noise Stack (drives terrain shape). Migrated from params so old saves
     // get the default single Classic-Terrain layer == bit-identical to before.
     this.noiseStack = migrateStack(this.params.noiseStack);
@@ -190,6 +190,7 @@ export class Engine {
       forceRender: false,     // bypass the on-demand gate — draw every frame
       disableHeightBake: false, // force the live per-pixel height field (studio bake off)
     };
+    this._landingShowcase = false;
 
     this._initRenderer();
     this._autoSelectPresetByGpu();   // first run only: pick a preset for the GPU
@@ -1190,6 +1191,23 @@ export class Engine {
   // ------------------------------------------------------------------ camera
 
   resetView() { this.controls.reset(this.boardSize); }
+
+  setLandingShowcase(active) {
+    if (this._landingShowcase === active) return;
+    this._landingShowcase = active;
+    if (this.worldMode !== 'studio' || !this.controls) return;
+    if (active) {
+      this.controls.autoOrbit = true;
+      this.controls.enabled = false;
+      this.controls.reset(this.boardSize);
+      this._needsRender = true;
+    } else {
+      this.controls.autoOrbit = false;
+      this.controls.enabled = true;
+      this.controls.blendToDefault(this.boardSize);
+      this._needsRender = true;
+    }
+  }
 
   setMinimapCanvases(baseCanvas, overlayCanvas) {
     this.minimap.setCanvases(baseCanvas, overlayCanvas);
@@ -2417,6 +2435,7 @@ export class Engine {
     // forgot to invalidate self-heals within a second (cheap insurance).
     const heartbeat = now - this._lastRenderAt > 1000;
     const shouldRender = !this.perf.onDemandStudio || this._debug.forceRender
+      || this._landingShowcase || this.controls.isSettling
       || this._needsRender || moved || animating || minimapDirty || heartbeat;
 
     if (shouldRender) {

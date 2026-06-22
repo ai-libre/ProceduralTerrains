@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import App from './App.jsx';
+import Root from './Root.jsx';
 import { LoadingProvider } from './state/loading.jsx';
 import './styles.css';
 
@@ -7,7 +7,7 @@ import './styles.css';
 // a second WebGL context + full terrain board on every load.
 createRoot(document.getElementById('root')).render(
   <LoadingProvider>
-    <App />
+    <Root />
   </LoadingProvider>,
 );
 

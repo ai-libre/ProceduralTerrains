@@ -33,6 +33,8 @@ export class EditorControls {
 
     this.onFirstInteract = null;
     this.enabled = true;           // false while the studio player walks
+    this.autoOrbit = false;        // slow showcase spin (landing page)
+    this.autoOrbitSpeed = 0.11;    // radians per second
     this.inputMode = 'all';        // 'all' or 'orbitOnly' while paint mode owns left drag
     this._interacted = false;
     this._drag = null;             // { button, x, y }
@@ -83,6 +85,34 @@ export class EditorControls {
     this.radius = this.goalRadius;
     this.theta = this.goalTheta;
     this.phi = this.goalPhi;
+    this._smoothRate = null;
+  }
+
+  blendToDefault(boardSize) {
+    this.goalTarget.set(0, 0, 0);
+    this.goalRadius = boardSize * 1.4;
+    const goalTheta = 45 * DEG;
+    this.goalPhi = this.mode === 'topdown' ? 0.5 * DEG : 55 * DEG;
+    let dTheta = goalTheta - this.theta;
+    while (dTheta > Math.PI) dTheta -= Math.PI * 2;
+    while (dTheta < -Math.PI) dTheta += Math.PI * 2;
+    this.goalTheta = this.theta + dTheta;
+    this._smoothRate = 3.2;
+  }
+
+  get isSettling() {
+    if (this._smoothRate == null) return false;
+    return Math.abs(this.goalRadius - this.radius) > 2
+      || this.target.distanceToSquared(this.goalTarget) > 4
+      || Math.abs(this.goalPhi - this.phi) > 0.002
+      || Math.abs(this.goalTheta - this.theta) > 0.002;
+  }
+
+  _nearGoals() {
+    return Math.abs(this.goalRadius - this.radius) <= 2
+      && this.target.distanceToSquared(this.goalTarget) <= 4
+      && Math.abs(this.goalPhi - this.phi) <= 0.002
+      && Math.abs(this.goalTheta - this.theta) <= 0.002;
   }
 
   focusCenter() { this.goalTarget.set(0, 0, 0); }
@@ -201,13 +231,17 @@ export class EditorControls {
   }
 
   update(dt) {
-    const k = 1 - Math.exp(-dt * 9);
+    if (this.autoOrbit) this.goalTheta += dt * this.autoOrbitSpeed;
+
+    const rate = this._smoothRate ?? 9;
+    const k = 1 - Math.exp(-dt * rate);
     this.target.lerp(this.goalTarget, k);
     this.radius += (this.goalRadius - this.radius) * k;
     this.phi += (this.goalPhi - this.phi) * k;
-    // shortest-path theta blend
-    let dTheta = this.goalTheta - this.theta;
+    const dTheta = this.goalTheta - this.theta;
     this.theta += dTheta * k;
+
+    if (this._smoothRate != null && this._nearGoals()) this._smoothRate = null;
 
     const sinPhi = Math.sin(this.phi);
     this.camera.position.set(

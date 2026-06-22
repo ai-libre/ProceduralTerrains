@@ -43,6 +43,8 @@ export default function App() {
   const [previewMode, setPreviewMode] = useState(false);
   const [activePanel, setActivePanel] = useState(null);
   const [paintState, setPaintState] = useState({ enabled: false });
+  const [tileDebug, setTileDebug] = useState({ view: 'off', showLegend: true, opacity: 1, showPreview: true });
+  const [importedMaps, setImportedMaps] = useState({ noise: null, height: null, biome: null });
 
   const [worldMode, setWorldMode] = useState('studio');
   const [infiniteStats, setInfiniteStats] = useState(null);
@@ -126,6 +128,8 @@ export default function App() {
         onTimeOfDayChange: setTimeOfDay,
         onPerfChange: setPerf,
         onPaintState: setPaintState,
+        onTileDebug: setTileDebug,
+        onImportedMaps: setImportedMaps,
       },
     });
     engine.setCullingEnabled(cullingEnabled);
@@ -334,6 +338,10 @@ export default function App() {
     timeOfDay, onTimeOfDay: handleTimeOfDay,
     onExport, onExportScreenshot, onExportHeightmap,
     onNoiseStack: (stack) => engine().setNoiseStack(stack),
+    tileDebug, importedMaps,
+    onTileDebug: (next) => engine().setTileDebug(next),
+    onImportTileMap: (type, file) => engine().importTileMap(type, file),
+    onTileMapSetting: (type, key, value) => engine().setTileMapSetting(type, key, value),
     onSoloLayer: (id) => engine().setSoloLayer(id),
     _soloLayerId: engineRef.current?._soloLayerId ?? null,
   };

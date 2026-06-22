@@ -96,6 +96,24 @@ void main() {
   bw.canyon = clamp(max(bw.canyon, paintedBiome.g), 0.0, 1.0);
   bw.wetland = clamp(max(bw.wetland, paintedBiome.b), 0.0, 1.0);
   bw.mountains = clamp(max(bw.mountains, paintedBiome.a), 0.0, 1.0);
+#ifndef INFINITE_MODE
+  if (uImportBiomeMode > 1.5) {
+    float b = importedMapValue(uImportBiomeTex, tileUvAt(xz));
+    BiomeWeights importedBw;
+    importedBw.desert = 1.0 - smoothstep(0.18, 0.32, b);
+    importedBw.canyon = smoothstep(0.22, 0.42, b) * (1.0 - smoothstep(0.43, 0.58, b));
+    importedBw.wetland = smoothstep(0.44, 0.60, b) * (1.0 - smoothstep(0.62, 0.78, b));
+    importedBw.mountains = smoothstep(0.66, 0.86, b);
+    if (uImportBiomeMode > 2.5) {
+      bw.desert = mix(bw.desert, importedBw.desert, uImportBiomeBlend);
+      bw.canyon = mix(bw.canyon, importedBw.canyon, uImportBiomeBlend);
+      bw.wetland = mix(bw.wetland, importedBw.wetland, uImportBiomeBlend);
+      bw.mountains = mix(bw.mountains, importedBw.mountains, uImportBiomeBlend);
+    } else {
+      bw = importedBw;
+    }
+  }
+#endif
 
   float eps = uEps;
   float hC, hX, hZ;
@@ -119,6 +137,26 @@ void main() {
     hX = heightAt(xz + vec2(eps, 0.0));
     hZ = heightAt(xz + vec2(0.0, eps));
     nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+  }
+
+  if (uTileDebugView > 0.5) {
+    float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
+    if (uTileDebugView < 1.5) {
+      float n = stackHeight2D(xz, cl);
+#ifndef INFINITE_MODE
+      if (uImportNoiseMode > 1.5) {
+        float importedNoise = importedMapValue(uImportNoiseTex, tileUvAt(xz)) * uAmplitude;
+        n = (uImportNoiseMode > 2.5) ? mix(n, importedNoise, uImportNoiseBlend) : importedNoise;
+      }
+#endif
+      gl_FragColor = vec4(vec3(clamp(n, 0.0, 1.0)), 1.0);
+    } else if (uTileDebugView < 2.5) {
+      gl_FragColor = vec4(vec3(h01), 1.0);
+    } else {
+      vec3 dbg = terrainBiomeDebugColor(bw, h01);
+      gl_FragColor = vec4(dbg, 1.0);
+    }
+    return;
   }
 
   if (uColorMode > 0.5) {
@@ -260,6 +298,18 @@ export function createTerrainUniforms() {
     uLayerMaskA:     { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Vector4()) },
     uLayerMaskB:     { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Vector4()) },
     uNoiseDebug:     { value: 0.0 },
+    uTileDebugView:  { value: 0.0 },
+    uImportNoiseTex: { value: null },
+    uImportHeightTex:{ value: null },
+    uImportBiomeTex: { value: null },
+    uImportNoiseMode:{ value: 0.0 },
+    uImportHeightMode:{ value: 0.0 },
+    uImportBiomeMode:{ value: 0.0 },
+    uImportNoiseBlend:{ value: 1.0 },
+    uImportHeightBlend:{ value: 1.0 },
+    uImportHeightStrength:{ value: 1.0 },
+    uImportHeightOffset:{ value: 0.0 },
+    uImportBiomeBlend:{ value: 1.0 },
     ...paletteUniforms,
   };
 }

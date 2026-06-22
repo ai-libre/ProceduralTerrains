@@ -42,11 +42,12 @@ export const PANEL_META = {
   lighting: { label: 'Lighting', title: 'Lighting', desc: 'Sun, atmosphere and fog.', icon: ic(<><circle cx="10" cy="10" r="3" stroke="currentColor" strokeWidth="1.4" /><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M15.7 4.3l-1.8 1.8M6.1 13.9l-1.8 1.8" stroke="currentColor" strokeWidth="1.3" /></>) },
   export: { label: 'Export', title: 'Export', desc: 'Export meshes and textures.', icon: ic(<><path d="M10 3v9M10 3 7 6M10 3l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /><path d="M4 12v4h12v-4" stroke="currentColor" strokeWidth="1.4" /></>) },
   performance: { label: 'Performance', title: 'Performance', desc: 'Quality, LOD and budgets.', icon: ic(<path d="M3 15h14M5 11l3-5 3 4 4-7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />) },
+  tileMaps: { label: 'Maps', title: 'Tile Maps', desc: 'Debug terrain maps and import custom map inputs.', modes: ['studio'], icon: ic(<><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="1.3" /><path d="M3 8h14M8 3v14" stroke="currentColor" strokeWidth="1.1" /></>) },
   debug: { label: 'Debug', title: 'Debug', desc: 'Live stats and diagnostics.', icon: ic(<><circle cx="10" cy="10" r="4" stroke="currentColor" strokeWidth="1.4" /><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.5 4.5l1.5 1.5M14 14l1.5 1.5M15.5 4.5L14 6M6 14l-1.5 1.5" stroke="currentColor" strokeWidth="1.2" /></>) },
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'tileMaps', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -427,6 +428,71 @@ function DebugOptions({ ctx }) {
   );
 }
 
+
+const DEBUG_VIEW_OPTIONS = [
+  { value: 'off', label: 'Off' }, { value: 'noise', label: 'Noise Texture' },
+  { value: 'height', label: 'Height Map' }, { value: 'biome', label: 'Biome Map' },
+];
+const IMPORT_MODE_OPTIONS = [
+  { value: 'disabled', label: 'Disabled' }, { value: 'preview', label: 'Preview Only' },
+  { value: 'replace', label: 'Replace Procedural' }, { value: 'blend', label: 'Blend With Procedural' },
+];
+const MAP_LABEL = { noise: 'Noise Map', height: 'Height Map', biome: 'Biome Map' };
+
+function TileMapsPanel({ ctx }) {
+  const dbg = ctx.tileDebug ?? { view: 'off', showLegend: true, opacity: 1, showPreview: true };
+  return (
+    <SidePanel title="Tile Maps" description="Debug generated Tile maps and import custom map inputs." onClose={ctx.onClose}>
+      <div className="panel-group">
+        <div className="panel-group-header"><span className="panel-group-title">TILE DEBUG</span></div>
+        <div className="panel-group-body">
+          <SelectRow label="Debug View" value={dbg.view} options={DEBUG_VIEW_OPTIONS} onChange={(v) => ctx.onTileDebug({ view: v })}
+            info="Displays internal terrain maps directly on the Tile terrain without changing saved terrain data." />
+          <ToggleRow label="Show Legend" value={!!dbg.showLegend} onChange={(v) => ctx.onTileDebug({ showLegend: v })} />
+          {dbg.view === 'biome' && dbg.showLegend && <BiomeLegend />}
+        </div>
+      </div>
+      <div className="panel-group">
+        <div className="panel-group-header"><span className="panel-group-title">IMPORT MAPS</span></div>
+        <div className="panel-group-body">
+          <p className="section-hint">Tile Mode only. Imported height maps in Replace or Blend mode deform the real terrain mesh and GLB export.</p>
+          {['noise', 'height', 'biome'].map((type) => <ImportMapSection key={type} type={type} map={ctx.importedMaps?.[type]} ctx={ctx} />)}
+        </div>
+      </div>
+    </SidePanel>
+  );
+}
+function BiomeLegend() {
+  const rows = [['#d6b35a', 'Desert / sand'], ['#b05f32', 'Canyon / dry rock'], ['#2f9f67', 'Wetland / grass'], ['#8b8f98', 'Mountains / snow']];
+  return <div className="panel-group-body" style={{ padding: '6px 0' }}>{rows.map(([c,l]) => <div className="stat-row" key={l}><span><span style={{ display:'inline-block', width:12, height:12, borderRadius:3, background:c, marginRight:8, verticalAlign:'-2px' }} />{l}</span></div>)}</div>;
+}
+function ImportMapSection({ type, map, ctx }) {
+  const settings = map?.settings ?? { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
+  const set = (key, value) => ctx.onTileMapSetting(type, key, value);
+  return (
+    <div className="panel-group" style={{ marginTop: 10 }}>
+      <div className="panel-group-header"><span className="panel-group-title">{MAP_LABEL[type]}</span></div>
+      <div className="panel-group-body">
+        <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && ctx.onImportTileMap(type, e.target.files[0])} />
+        {map?.preview && <img src={map.preview} alt={`${MAP_LABEL[type]} preview`} style={{ width: '100%', maxHeight: 120, objectFit: 'cover', borderRadius: 8, marginTop: 8 }} />}
+        <div className="stat-row"><span className="stat-label">File</span><span className="stat-value">{map?.fileName ?? 'None'}</span></div>
+        <div className="stat-row"><span className="stat-label">Resolution</span><span className="stat-value stat-mono">{map ? `${map.width}×${map.height}` : '—'}</span></div>
+        {map?.error && <p className="section-hint" style={{ color: '#ff8a8a' }}>{map.error}</p>}
+        {map?.warning && <p className="section-hint">{map.warning}</p>}
+        <SelectRow label="Usage Mode" value={settings.mode} options={IMPORT_MODE_OPTIONS} onChange={(v) => set('mode', v)} />
+        {settings.mode === 'replace' && <p className="section-hint">{MAP_LABEL[type]} is replacing procedural data. Some procedural settings may have reduced or no effect for this map type.</p>}
+        {settings.mode === 'blend' && <SliderCtl def={{ label: 'Blend Strength', min: 0, max: 1, step: 0.01, digits: 2 }} value={settings.blend} onChange={(v) => set('blend', v)} />}
+        <ToggleRow label="Invert" value={!!settings.invert} onChange={(v) => set('invert', v)} />
+        <ToggleRow label="Normalize" value={!!settings.normalize} onChange={(v) => set('normalize', v)} />
+        {type === 'height' && <>
+          <SliderCtl def={{ label: 'Height Strength', min: 0, max: 2, step: 0.01, digits: 2 }} value={settings.heightStrength} onChange={(v) => set('heightStrength', v)} />
+          <SliderCtl def={{ label: 'Height Offset', min: -500, max: 500, step: 1, digits: 0, unit: 'm' }} value={settings.heightOffset} onChange={(v) => set('heightOffset', v)} />
+        </>}
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------- export panel
 const FORMAT_OPTIONS = [
   { value: 'glb', label: 'GLB / GLTF (Recommended)' },
@@ -519,7 +585,7 @@ function NoiseLayersPanelWrapper({ ctx }) {
 }
 
 const COMPONENTS = {
-  terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
+  terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, tileMaps: TileMapsPanel, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
   water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
 };

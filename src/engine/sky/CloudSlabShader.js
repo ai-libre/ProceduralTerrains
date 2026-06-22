@@ -81,10 +81,14 @@ void main() {
     }
   }
 
+  // distance LOD: fewer effective steps when far (uCloudStepScale<1); loop
+  // bound stays CLOUD_STEPS (static for ANGLE), extra iterations no-op.
+  int effSteps = int(float(CLOUD_STEPS) * clamp(uCloudStepScale, 0.05, 1.0) + 0.5);
+  effSteps = max(effSteps, 8);
   float segLen = t1 - t0;
-  float stepLen = segLen / float(CLOUD_STEPS);
+  float stepLen = segLen / float(effSteps);
 
-  float dither = cl_hash13(vWorldPos * 0.5 + uCloudTime);
+  float dither = cl_hash13(vec3(gl_FragCoord.xy, uCloudTime));
   float t = t0 + stepLen * dither;
 
   float transmittance = 1.0;
@@ -92,7 +96,7 @@ void main() {
   vec3 ambient = uCloudShadowColor * uCloudShadowStrength;
 
   for (int i = 0; i < CLOUD_STEPS; i++) {
-    if (transmittance > 0.01) {
+    if (i < effSteps && transmittance > 0.01) {
       vec3 P = ro + rd * t;
       float dens = cloudDensity(P);
       if (dens > 0.001) {
@@ -115,7 +119,7 @@ void main() {
 }
 `;
 
-export function createCloudSlabMaterial(steps = 64, lightSteps = 6, octaves = 5, detailOctaves = 4, useErosion = true) {
+export function createCloudSlabMaterial(steps = 24, lightSteps = 6, octaves = 5, detailOctaves = 4, useErosion = true, lightMode = 0) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uCloudBottom:          { value: 900 },
@@ -142,6 +146,7 @@ export function createCloudSlabMaterial(steps = 64, lightSteps = 6, octaves = 5,
       uCloudSelfShadow:      { value: 1.0 },
       uCloudSunDir:          { value: new THREE.Vector3(0.4, 0.7, 0.5).normalize() },
       uCloudNoiseVariant:    { value: 0.0 },
+      uCloudStepScale:       { value: 1.0 },
       tSceneDepth:           { value: null },
       uDepthResolution:      { value: new THREE.Vector2(1, 1) },
       uProjectionMatrixInverse: { value: new THREE.Matrix4() },
@@ -154,12 +159,18 @@ export function createCloudSlabMaterial(steps = 64, lightSteps = 6, octaves = 5,
       CLOUD_OCTAVES: Math.max(1, Math.round(octaves)),
       CLOUD_DETAIL_OCTAVES: Math.max(0, Math.round(detailOctaves)),
       CLOUD_USE_EROSION: useErosion ? 1 : 0,
+      CLOUD_LIGHT_MODE: lightMode ? 1 : 0,
     },
     vertexShader: VERTEX,
     fragmentShader: FRAGMENT,
     transparent: true,
     depthWrite: false,
     depthTest: false,         // occlusion is handled by tSceneDepth per pixel
-    side: THREE.DoubleSide,    // visible from above and below the slab plane
+    // BackSide on a box that ENCLOSES the slab volume: the back faces always
+    // project over the volume's screen footprint from inside, outside, above or
+    // below (mirrors the planet shell's BackSide sphere). A flat plane left the
+    // clouds clipped at grazing angles from below, where horizon-bound rays hit
+    // the finite plane beyond its extent and produced no fragment.
+    side: THREE.BackSide,
   });
 }

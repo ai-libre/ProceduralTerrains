@@ -83,6 +83,14 @@ export default function CloudPanel({ params, onParam, perf, onPerfSetting, onClo
 
       {enabled && (
         <>
+          {worldMode === 'planet' && (
+            <ToggleRow
+              label="Chunked Clouds"
+              value={val(params, 'cloudChunksEnabled')}
+              onChange={(v) => onParam('cloudChunksEnabled', v)}
+              info="Divide clouds into sector chunks with terrain culling. Disable for a seamless single-mesh fallback."
+            />
+          )}
           <div className="subsection-label">Shape</div>
           {SHAPE_SLIDERS.map((def) => (
             <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} />

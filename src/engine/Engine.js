@@ -4,6 +4,7 @@ import { createWaterMaterial, createInfiniteWaterMaterial, rebuildWaterShaderSou
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
 import { PlanetWorld } from './terrain/PlanetWorld.js';
+import { PlanetCloudChunks } from './sky/PlanetCloudChunks.js';
 import { PlanetCloudLayer } from './sky/PlanetCloudLayer.js';
 import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
 import { CLOUD_QUALITY_PRESETS, CLOUD_LEGACY_PERF_KEYS } from './sky/CloudSettings.js';
@@ -139,6 +140,7 @@ export class Engine {
     this.planetWaterMat = null;
     this.planetControls = null;
     this.planetSampler = null;
+    this.planetCloudChunks = null;
     this.planetCloudLayer = null;
     this.planetHeightBaker = null;   // bakes the static height field → cubemap
     this._bakedTerrainGen = -1;      // terrain generation the cubemap was baked at
@@ -1564,16 +1566,24 @@ export class Engine {
 
     this._buildPlanetWorld();
 
-    // volumetric cloud shell (drawn around the globe; raymarched in-shader).
-    // Self-contained — never touches the planet world / water / LOD / export.
-    this.planetCloudLayer = new PlanetCloudLayer(this.scene, {
-      planetRadius: this._planetRadius(),
-      compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
-    });
+    // volumetric cloud shell (either chunked with culling, or seamless single-mesh)
+    if (p.cloudChunksEnabled !== false) {
+      this.planetCloudChunks = new PlanetCloudChunks(this.scene, {
+        planetRadius: this._planetRadius(),
+        faceGrid: 4,
+        compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
+      });
+      this.planetCloudChunks.warmup()
+        .catch((e) => console.warn('Cloud shader warmup failed', e));
+    } else {
+      this.planetCloudLayer = new PlanetCloudLayer(this.scene, {
+        planetRadius: this._planetRadius(),
+        compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
+      });
+      this.planetCloudLayer.warmup()
+        .catch((e) => console.warn('Cloud shader warmup failed', e));
+    }
     this._applyCloudSettings();
-    // warm the cloud program in the background so first enable doesn't hang
-    this.planetCloudLayer.warmup()
-      .catch((e) => console.warn('Cloud shader warmup failed', e));
 
     // open-space backdrop (procedural sky is added in a later pass)
     this.scene.background = new THREE.Color(0x05070d);
@@ -1605,6 +1615,37 @@ export class Engine {
    *  rebuild). Both layers read the same cloud* params; each is only visible in
    *  its own world mode. */
   _applyCloudSettings() {
+    if (this.worldMode === 'planet') {
+      const wantChunks = this.params.cloudChunksEnabled !== false;
+      if (wantChunks && !this.planetCloudChunks) {
+        if (this.planetCloudLayer) {
+          this.planetCloudLayer.dispose();
+          this.planetCloudLayer = null;
+        }
+        this.planetCloudChunks = new PlanetCloudChunks(this.scene, {
+          planetRadius: this._planetRadius(),
+          faceGrid: 4,
+          compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
+        });
+        this.planetCloudChunks.warmup()
+          .catch((e) => console.warn('Cloud shader warmup failed', e));
+      } else if (!wantChunks && !this.planetCloudLayer) {
+        if (this.planetCloudChunks) {
+          this.planetCloudChunks.dispose();
+          this.planetCloudChunks = null;
+        }
+        this.planetCloudLayer = new PlanetCloudLayer(this.scene, {
+          planetRadius: this._planetRadius(),
+          compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
+        });
+        this.planetCloudLayer.warmup()
+          .catch((e) => console.warn('Cloud shader warmup failed', e));
+      }
+    }
+
+    if (this.planetCloudChunks) {
+      this.planetCloudChunks.applyParams(this.params, this._planetRadius(), this.perf);
+    }
     if (this.planetCloudLayer) {
       this.planetCloudLayer.applyParams(this.params, this._planetRadius(), this.perf);
     }
@@ -1706,6 +1747,7 @@ export class Engine {
   /** Dispose the planet-mode systems (does not restore studio). */
   _disposePlanet() {
     if (this.player) { this.player.dispose(); this.player = null; }
+    if (this.planetCloudChunks) { this.planetCloudChunks.dispose(); this.planetCloudChunks = null; }
     if (this.planetCloudLayer) { this.planetCloudLayer.dispose(); this.planetCloudLayer = null; }
     if (this.planetHeightBaker) { this.planetHeightBaker.dispose(); this.planetHeightBaker = null; }
     // reset the shared cubemap uniforms so studio/infinite never sample a stale
@@ -2367,6 +2409,9 @@ export class Engine {
     }
 
     if (this.planetWorld) this.planetWorld.update(this.camera.position, this.camera);
+    if (this.planetCloudChunks) {
+      this.planetCloudChunks.update(dt, this.camera.position, this.uniforms.uSunDir.value, this.camera, this.planetWorld);
+    }
     if (this.planetCloudLayer) {
       this.planetCloudLayer.update(dt, this.camera.position, this.uniforms.uSunDir.value);
     }
@@ -2385,6 +2430,15 @@ export class Engine {
     // refresh the baked height/normal cubemap if the field changed (no-op on a
     // steady frame); the planet terrain + water shaders sample it per pixel.
     this._ensurePlanetHeightTex();
+
+    // depth prepass so the cloud march is occluded by the terrain relief
+    // (otherwise clouds show through the surface up close)
+    if (this.planetCloudChunks) {
+      this.planetCloudChunks.renderDepthPrepass(this.renderer, this.camera);
+    }
+    if (this.planetCloudLayer) {
+      this.planetCloudLayer.renderDepthPrepass(this.renderer, this.camera);
+    }
 
     // planet renders straight to the canvas — no underwater render-target pass
     this.renderer.render(this.scene, this.camera);

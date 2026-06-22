@@ -37,11 +37,13 @@ export class PlanetCloudLayer {
     this.planetRadius = opts.planetRadius || 16000;
     this._compile = opts.compile || null;
 
-    this._steps = 64;
+    this._steps = 24;
     this._lightSteps = 6;
     this._octaves = 5;
     this._detailOctaves = 4;
     this._useErosion = true;
+    this._lightMode = 0;
+    this._stepLOD = false;
     this._enabled = false;
     this._inRange = true;
     this._maxDistance = Infinity;
@@ -51,7 +53,13 @@ export class PlanetCloudLayer {
     this._compileToken = 0;
     this._pendingCompile = null;
 
-    this.material = createCloudMaterial(this._steps, this._lightSteps, this._octaves, this._detailOctaves, this._useErosion);
+    // scene-depth prepass (terrain occlusion of the clouds, like the studio slab)
+    this._depthTarget = null;
+    this._depthTexture = null;
+    this._depthSize = new THREE.Vector2();
+    this._prevClearColor = new THREE.Color();
+
+    this.material = createCloudMaterial(this._steps, this._lightSteps, this._octaves, this._detailOctaves, this._useErosion, this._lightMode);
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), this.material);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 20;        // after terrain (default) + water (10)
@@ -116,6 +124,8 @@ export class PlanetCloudLayer {
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;
     u.uCloudSelfShadow.value = q.selfShadow ? 1.0 : 0.0;
     u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
+    this._stepLOD = q.stepLOD;
+    if (!this._stepLOD) u.uCloudStepScale.value = 1.0;
 
     if (params.cloudColor) u.uCloudColor.value.setRGB(...params.cloudColor);
     if (params.cloudShadowColor) u.uCloudShadowColor.value.setRGB(...params.cloudShadowColor);
@@ -134,8 +144,9 @@ export class PlanetCloudLayer {
         q.lightSteps !== this._lightSteps ||
         q.octaves !== this._octaves ||
         q.detailOctaves !== this._detailOctaves ||
-        q.useErosion !== this._useErosion) {
-      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion);
+        q.useErosion !== this._useErosion ||
+        q.lightMode !== this._lightMode) {
+      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion, q.lightMode);
     }
   }
 
@@ -165,6 +176,11 @@ export class PlanetCloudLayer {
   }
 
   warmup() {
+    // If a material rebuild is already compiling (e.g. perf settings applied a
+    // non-default quality/light mode before warmup ran), defer to it. Starting
+    // a fresh compile here would bump _compileToken and make the rebuild's
+    // deferred swap bail, discarding the just-built material.
+    if (this._pendingCompile) return this._pendingCompile.promise;
     return this._compileCurrentMaterial();
   }
 
@@ -175,17 +191,18 @@ export class PlanetCloudLayer {
   }
 
   /** Swap the cloud material for a new step count (compile-time #define). */
-  _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion) {
+  _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion, lightMode = this._lightMode) {
     this._steps = steps;
     this._lightSteps = lightSteps;
     this._octaves = octaves;
     this._detailOctaves = detailOctaves;
     this._useErosion = useErosion;
+    this._lightMode = lightMode;
     const previous = this.material;
     const pendingPrevious = this._pendingCompile?.material === previous
       ? this._pendingCompile.promise
       : null;
-    const next = createCloudMaterial(steps, lightSteps, octaves, detailOctaves, useErosion);
+    const next = createCloudMaterial(steps, lightSteps, octaves, detailOctaves, useErosion, lightMode);
     // carry over current uniform values
     const a = previous.uniforms, b = next.uniforms;
     for (const k in b) {
@@ -219,13 +236,82 @@ export class PlanetCloudLayer {
     if (!this._inRange) return;
 
     const u = this.material.uniforms;
+    // step-LOD: full quality near the surface, ramping down to 0.4 at the cull
+    // distance so distant frames cost far fewer marched samples.
+    if (this._stepLOD && Number.isFinite(this._maxDistance)) {
+      const near = this.planetRadius;
+      const far = this._maxDistance;
+      const f = far > near ? (dist - near) / (far - near) : 0;
+      u.uCloudStepScale.value = Math.max(0.4, Math.min(1.0, 1.0 - f * 0.6));
+    }
     u.uCloudTime.value += dt;
     this._rotation += dt * (this._rotSpeed || 0);
     u.uCloudRotation.value = this._rotation;
     if (sunDir) u.uCloudSunDir.value.copy(sunDir);
   }
 
+  /** Render the opaque scene depth (clouds hidden) so the cloud march can clamp
+   *  to the terrain — fixes clouds showing through the surface up close. Mirrors
+   *  CloudSlabLayer.renderDepthPrepass. Call once per frame before the main render. */
+  renderDepthPrepass(renderer, camera) {
+    if (!this.active) {
+      this.material.uniforms.uUseDepth.value = 0.0;
+      return false;
+    }
+    this._ensureDepthTarget(renderer);
+
+    const wasVisible = this.mesh.visible;
+    const prevTarget = renderer.getRenderTarget();
+    const prevClearAlpha = renderer.getClearAlpha();
+    renderer.getClearColor(this._prevClearColor);
+
+    try {
+      this.mesh.visible = false;
+      renderer.setRenderTarget(this._depthTarget);
+      renderer.setClearColor(0x000000, 1);
+      renderer.clear(true, true, true);
+      renderer.render(this.scene, camera);
+    } finally {
+      this.mesh.visible = wasVisible;
+      renderer.setRenderTarget(prevTarget);
+      renderer.setClearColor(this._prevClearColor, prevClearAlpha);
+    }
+
+    const u = this.material.uniforms;
+    u.tSceneDepth.value = this._depthTexture;
+    u.uDepthResolution.value.set(this._depthTarget.width, this._depthTarget.height);
+    u.uProjectionMatrixInverse.value.copy(camera.projectionMatrixInverse);
+    u.uViewMatrixInverse.value.copy(camera.matrixWorld);
+    u.uUseDepth.value = 1.0;
+    return true;
+  }
+
+  _ensureDepthTarget(renderer) {
+    const size = renderer.getDrawingBufferSize(this._depthSize);
+    const w = Math.max(1, Math.round(size.x));
+    const h = Math.max(1, Math.round(size.y));
+    if (this._depthTarget && this._depthTarget.width === w && this._depthTarget.height === h) return;
+
+    if (this._depthTarget) this._depthTarget.dispose();
+    this._depthTexture = new THREE.DepthTexture(w, h);
+    this._depthTexture.type = THREE.UnsignedInt248Type;
+    this._depthTexture.format = THREE.DepthStencilFormat;
+    this._depthTarget = new THREE.WebGLRenderTarget(w, h, {
+      depthTexture: this._depthTexture,
+      depthBuffer: true,
+      stencilBuffer: true,
+    });
+    this._depthTarget.texture.minFilter = THREE.NearestFilter;
+    this._depthTarget.texture.magFilter = THREE.NearestFilter;
+    this._depthTarget.texture.generateMipmaps = false;
+  }
+
   dispose() {
+    if (this._depthTarget) {
+      this._depthTarget.dispose();
+      this._depthTarget = null;
+      this._depthTexture = null;
+    }
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();
     this.material.dispose();

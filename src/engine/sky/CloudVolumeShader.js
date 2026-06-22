@@ -37,6 +37,33 @@ ${CLOUD_VOLUME_GLSL}
 
 varying vec3 vWorldPos;
 
+// scene-depth occlusion (terrain hides clouds behind it). Active only when a
+// depth prepass has populated tSceneDepth (uUseDepth = 1); the analytic inner-
+// sphere clamp above already handles the far hemisphere, this adds true relief
+// occlusion so clouds no longer show through the surface up close.
+uniform sampler2D tSceneDepth;
+uniform vec2 uDepthResolution;
+uniform mat4 uProjectionMatrixInverse;
+uniform mat4 uViewMatrixInverse;
+uniform float uDepthBias;
+uniform float uUseDepth;
+
+#if defined(CLOUD_CHUNK) && CLOUD_CHUNK > 0
+// Per-chunk angular sector: 4 inward planes through the planet origin. The march
+// is clipped to dot(N_k, P) >= 0 for every k, so each cube-face cell owns a
+// DISJOINT slice of the shell. Back-to-front "over" compositing across the
+// chunk meshes (Three sorts transparents by distance) reconstructs exactly the
+// single continuous march — no double counting, same visual.
+uniform vec3 uCellNormals[4];
+#endif
+
+vec3 reconstructWorldPosition(vec2 uv, float depth) {
+  vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+  vec4 view = uProjectionMatrixInverse * clip;
+  view.xyz /= view.w;
+  return (uViewMatrixInverse * vec4(view.xyz, 1.0)).xyz;
+}
+
 void main() {
   // planet is centered at the world origin, so camera position IS the ray
   // origin in planet-local space.
@@ -56,14 +83,59 @@ void main() {
   float ro2 = dot(ro, ro);
   if (ro2 < uCloudInner * uCloudInner && inner.y > tStart) tStart = inner.y;
 
+  // Save the pure shell segment BEFORE depth/chunk modifications. The global
+  // sampling lattice (stepLen + baseT) is derived from this so every chunk on
+  // a ray shares the exact same sample positions — no seam lines.
+  float shellStart = tStart;
+  float shellEnd   = tEnd;
+
+  // terrain depth occlusion: clamp the marched segment to the opaque scene hit
+  if (uUseDepth > 0.5) {
+    vec2 depthUv = gl_FragCoord.xy / max(uDepthResolution, vec2(1.0));
+    if (depthUv.x >= 0.0 && depthUv.x <= 1.0 && depthUv.y >= 0.0 && depthUv.y <= 1.0) {
+      float sceneDepth = texture2D(tSceneDepth, depthUv).x;
+      if (sceneDepth < 0.99999) {
+        vec3 sceneHit = reconstructWorldPosition(depthUv, sceneDepth);
+        float hitT = dot(sceneHit - ro, rd);
+        if (hitT > 0.0 && hitT < tEnd) tEnd = hitT - uDepthBias;
+      }
+    }
+  }
+
   if (tEnd <= tStart) discard;
 
-  float segLen = tEnd - tStart;
-  float stepLen = segLen / float(CLOUD_STEPS);
+  // GLOBAL sampling lattice from the PURE shell segment (before depth clamp and
+  // chunk clip). This guarantees the lattice is identical for all chunks on a
+  // given ray, so back-to-front "over" compositing reconstructs a seamless
+  // single march. The depth clamp and chunk clip only narrow the marched range
+  // — the step positions themselves never change.
+  int effSteps = int(float(CLOUD_STEPS) * clamp(uCloudStepScale, 0.05, 1.0) + 0.5);
+  effSteps = max(effSteps, 8);
+  float stepLen = (shellEnd - shellStart) / float(effSteps);
+  float dither = cl_hash13(vec3(gl_FragCoord.xy, uCloudTime));
+  float baseT = shellStart + stepLen * dither;
 
-  // small hash dither on the start offset to break up banding
-  float dither = cl_hash13(vWorldPos * 0.5 + uCloudTime);
-  float t = tStart + stepLen * dither;
+#if defined(CLOUD_CHUNK) && CLOUD_CHUNK > 0
+  // clip the marched range to this chunk's angular sector (4 origin planes),
+  // keeping stepLen/baseT (the global lattice) unchanged
+  for (int k = 0; k < 4; k++) {
+    vec3 N = uCellNormals[k];
+    float nro = dot(N, ro);
+    float nrd = dot(N, rd);
+    if (abs(nrd) < 1e-9) {
+      if (nro < 0.0) discard;            // ray runs parallel to and outside the plane
+    } else {
+      float tp = -nro / nrd;
+      if (nrd > 0.0) tStart = max(tStart, tp);
+      else           tEnd   = min(tEnd, tp);
+    }
+  }
+  if (tEnd <= tStart) discard;
+#endif
+
+  // first global-lattice sample at or after this (clipped) range start
+  float n0 = max(0.0, ceil((tStart - baseT) / stepLen));
+  float t = baseT + n0 * stepLen;
 
   float transmittance = 1.0;
   vec3 scatter = vec3(0.0);
@@ -71,7 +143,7 @@ void main() {
 
   for (int i = 0; i < CLOUD_STEPS; i++) {
     // conditional (not a break) keeps the loop bound static for the compiler
-    if (transmittance > 0.01) {
+    if (t < tEnd && transmittance > 0.01) {
       vec3 P = ro + rd * t;
       float dens = cloudDensity(P);
       if (dens > 0.001) {
@@ -101,10 +173,11 @@ void main() {
  * @param {number} octaves     base noise FBM octave count (compile-time)
  * @param {number} detailOctaves detail noise FBM octave count (compile-time)
  * @param {boolean} useErosion whether to use cellular erosion (compile-time)
+ * @param {number} lightMode  0 = secondary march, 1 = cheap 2-tap analytic shadow
+ * @param {boolean} chunk      true = sector-clipped chunk variant (CLOUD_CHUNK)
  */
-export function createCloudMaterial(steps = 64, lightSteps = 6, octaves = 5, detailOctaves = 4, useErosion = true) {
-  return new THREE.ShaderMaterial({
-    uniforms: {
+export function createCloudMaterial(steps = 24, lightSteps = 6, octaves = 5, detailOctaves = 4, useErosion = true, lightMode = 0, chunk = false) {
+  const uniforms = {
       uCloudInner:           { value: 16240 },
       uCloudOuter:           { value: 16860 },
       uCloudCoverage:        { value: 0.5 },
@@ -126,19 +199,37 @@ export function createCloudMaterial(steps = 64, lightSteps = 6, octaves = 5, det
       uCloudSelfShadow:      { value: 1.0 },
       uCloudSunDir:          { value: new THREE.Vector3(0.4, 0.7, 0.5).normalize() },
       uCloudNoiseVariant:    { value: 0.0 },
-    },
+      uCloudStepScale:       { value: 1.0 },
+      tSceneDepth:           { value: null },
+      uDepthResolution:      { value: new THREE.Vector2(1, 1) },
+      uProjectionMatrixInverse: { value: new THREE.Matrix4() },
+      uViewMatrixInverse:    { value: new THREE.Matrix4() },
+      uDepthBias:            { value: 2.0 },
+      uUseDepth:             { value: 0.0 },
+  };
+  if (chunk) {
+    // 4 inward sector planes through the planet origin (set per chunk)
+    uniforms.uCellNormals = { value: [
+      new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, -1, 0),
+    ] };
+  }
+  return new THREE.ShaderMaterial({
+    uniforms,
     defines: {
       CLOUD_STEPS: Math.max(8, Math.round(steps)),
       CLOUD_LIGHT_STEPS: Math.max(1, Math.round(lightSteps)),
       CLOUD_OCTAVES: Math.max(1, Math.round(octaves)),
       CLOUD_DETAIL_OCTAVES: Math.max(0, Math.round(detailOctaves)),
       CLOUD_USE_EROSION: useErosion ? 1 : 0,
+      CLOUD_LIGHT_MODE: lightMode ? 1 : 0,
+      CLOUD_CHUNK: chunk ? 1 : 0,
     },
     vertexShader: VERTEX,
     fragmentShader: FRAGMENT,
     transparent: true,
     depthWrite: false,
-    depthTest: false,          // far-side occlusion handled analytically
+    depthTest: false,          // far-side occlusion handled analytically + depth clamp
     side: THREE.BackSide,      // full-disc coverage from inside and outside
   });
 }

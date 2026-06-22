@@ -307,9 +307,22 @@ function renderSettings({
         <ToggleRow label="Self-Shadowing" value={perf.cloudSelfShadow !== false} onChange={(v) => onPerfSetting('cloudSelfShadow', v)} />
       </SettingGroup>
 
+      <SettingGroup tab="clouds" label="Fast Shadows" keywords="clouds shadow analytic cheap performance fast self lighting" {...groupProps}>
+        <ToggleRow label="Fast Shadows (analytic)" value={!!perf.cloudLightMode} onChange={(v) => onPerfSetting('cloudLightMode', v)} />
+      </SettingGroup>
+
+      <SettingNote tab="clouds" text="Fast Shadows replaces the secondary shadow march with a cheap 2-tap approximation — big win when Self-Shadowing is on, near-identical look." {...groupProps} />
+
       <SettingGroup tab="clouds" label="Shadow Steps" keywords="clouds shadow lighting steps" {...groupProps}>
         <PerfSlider perf={perf} id="cloudLightSteps" onPerfSetting={onPerfSetting} />
       </SettingGroup>
+
+      <SettingGroup tab="clouds" label="Distance Step LOD" keywords="clouds distance lod steps raymarch performance far" {...groupProps}>
+        <ToggleRow label="Distance Step LOD" value={!!perf.cloudStepLOD} onChange={(v) => onPerfSetting('cloudStepLOD', v)} />
+      </SettingGroup>
+
+      <SettingNote tab="clouds" text="Distance Step LOD marches fewer samples as the camera pulls away from the surface." {...groupProps} />
+
 
       <SettingGroup tab="clouds" label="Base Noise Octaves" keywords="clouds octaves noise fbm base" {...groupProps}>
         <PerfSlider perf={perf} id="cloudOctaves" onPerfSetting={onPerfSetting} />

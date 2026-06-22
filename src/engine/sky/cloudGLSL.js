@@ -124,6 +124,7 @@ uniform float uCloudTime;
 uniform float uCloudSelfShadow;    // 0/1 toggle
 uniform vec3  uCloudSunDir;        // normalized, surface -> sun
 uniform float uCloudNoiseVariant;  // 0 soft, 1 billowy, 2 wispy, 3 cellular
+uniform float uCloudStepScale;     // 0.4..1 — distance LOD on the primary march
 
 // rotate the sample domain slowly around the up (Y) axis (seamless — no UVs)
 vec3 cl_domain(vec3 P) {
@@ -194,9 +195,20 @@ vec2 cl_raySphere(vec3 ro, vec3 rd, float R) {
   return vec2(-b - s, -b + s);
 }
 
-// soft secondary march toward the sun for self-shadowing (fixed step count)
+// soft secondary lighting toward the sun for self-shadowing
 float cl_lightTransmittance(vec3 P) {
-  float stepLen = (uCloudOuter - uCloudInner) / float(CLOUD_LIGHT_STEPS) * 0.65;
+  float span = uCloudOuter - uCloudInner;
+#if defined(CLOUD_LIGHT_MODE) && CLOUD_LIGHT_MODE == 1
+  // cheap 2-tap analytic shadow: probe density toward the sun at two fixed
+  // offsets and fold into a single Beer term (no secondary march loop). The
+  // 0.65 span factor matches the marched path's effective optical depth so
+  // cloud brightness stays consistent with the full-march mode.
+  float d0 = cloudDensity(P + uCloudSunDir * span * 0.12);
+  float d1 = cloudDensity(P + uCloudSunDir * span * 0.40);
+  float dsum = d0 * 0.65 + d1 * 0.35;
+  return exp(-dsum * span * 0.65 * uCloudExtinction * uCloudLightAbsorption);
+#else
+  float stepLen = span / float(CLOUD_LIGHT_STEPS) * 0.65;
   float dsum = 0.0;
   vec3 sp = P;
   for (int i = 0; i < CLOUD_LIGHT_STEPS; i++) {
@@ -204,6 +216,7 @@ float cl_lightTransmittance(vec3 P) {
     dsum += cloudDensity(sp);
   }
   return exp(-dsum * stepLen * uCloudExtinction * uCloudLightAbsorption);
+#endif
 }
 `;
 
@@ -228,7 +241,15 @@ float cloudDensity(vec3 P) {
 }
 
 float cl_lightTransmittance(vec3 P) {
-  float stepLen = (uCloudTop - uCloudBottom) / float(CLOUD_LIGHT_STEPS) * 0.65;
+  float span = uCloudTop - uCloudBottom;
+#if defined(CLOUD_LIGHT_MODE) && CLOUD_LIGHT_MODE == 1
+  // cheap 2-tap analytic shadow (see the spherical shader for rationale)
+  float d0 = cloudDensity(P + uCloudSunDir * span * 0.12);
+  float d1 = cloudDensity(P + uCloudSunDir * span * 0.40);
+  float dsum = d0 * 0.65 + d1 * 0.35;
+  return exp(-dsum * span * 0.65 * uCloudExtinction * uCloudLightAbsorption);
+#else
+  float stepLen = span / float(CLOUD_LIGHT_STEPS) * 0.65;
   float dsum = 0.0;
   vec3 sp = P;
   for (int i = 0; i < CLOUD_LIGHT_STEPS; i++) {
@@ -236,5 +257,6 @@ float cl_lightTransmittance(vec3 P) {
     dsum += cloudDensity(sp);
   }
   return exp(-dsum * stepLen * uCloudExtinction * uCloudLightAbsorption);
+#endif
 }
 `;

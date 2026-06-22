@@ -21,6 +21,7 @@
 // CLOUD_LEGACY_PERF_KEYS below for migration of old saves.
 export const CLOUD_DEFAULT_PARAMS = {
   cloudsEnabled: false,
+  cloudChunksEnabled: true,
 
   // shape / coverage
   cloudCoverage: 0.50,        // 0..1 — fraction of sky covered (higher = more)
@@ -73,10 +74,10 @@ export function resolveCloudNoiseVariant(value) {
 // #defines in the shader (dynamic loop bounds hang the ANGLE/D3D11 compiler),
 // so changing quality swaps the define and recompiles in the background.
 export const CLOUD_QUALITY_PRESETS = {
-  low:    { steps: 16, lightSteps: 2, octaves: 3, detailOctaves: 0, useErosion: false },
-  medium: { steps: 40, lightSteps: 4, octaves: 4, detailOctaves: 2, useErosion: true },
-  high:   { steps: 64, lightSteps: 6, octaves: 5, detailOctaves: 4, useErosion: true },
-  ultra:  { steps: 96, lightSteps: 8, octaves: 5, detailOctaves: 5, useErosion: true },
+  low:    { steps: 12, lightSteps: 2, octaves: 3, detailOctaves: 0, useErosion: false },
+  medium: { steps: 16, lightSteps: 4, octaves: 4, detailOctaves: 2, useErosion: true },
+  high:   { steps: 24, lightSteps: 6, octaves: 5, detailOctaves: 4, useErosion: true },
+  ultra:  { steps: 48, lightSteps: 8, octaves: 5, detailOctaves: 5, useErosion: true },
 };
 
 // Fallback modes for weaker devices. They clamp the resolved quality and can
@@ -109,11 +110,13 @@ export function resolveCloudQuality(config) {
       detailOctaves: 0,
       useErosion: false,
       selfShadow: false,
+      lightMode: 0,
+      stepLOD: false,
       disabled: true
     };
   }
 
-  let steps = config.cloudSteps ?? 64;
+  let steps = config.cloudSteps ?? 12;
   let lightSteps = config.cloudLightSteps ?? 6;
   const octaves = config.cloudOctaves ?? 5;
   const detailOctaves = config.cloudDetailOctaves ?? 4;
@@ -122,6 +125,10 @@ export function resolveCloudQuality(config) {
   steps = Math.max(8, Math.min(steps, fb.maxSteps));
   lightSteps = Math.max(1, Math.min(lightSteps, fb.allowSelfShadow ? lightSteps : 1));
   const selfShadow = config.cloudSelfShadow !== false && fb.allowSelfShadow;
+  // cheap analytic self-shadow (2-tap) instead of the secondary march
+  const lightMode = config.cloudLightMode ? 1 : 0;
+  // distance-based primary-step LOD (drives uCloudStepScale per frame)
+  const stepLOD = !!config.cloudStepLOD;
 
   return {
     steps,
@@ -130,6 +137,8 @@ export function resolveCloudQuality(config) {
     detailOctaves,
     useErosion,
     selfShadow,
+    lightMode,
+    stepLOD,
     disabled: false
   };
 }

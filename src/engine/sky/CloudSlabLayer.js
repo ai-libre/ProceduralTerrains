@@ -23,11 +23,13 @@ export class CloudSlabLayer {
     this.scene = scene;
     this._compile = opts.compile || null;
 
-    this._steps = 64;
+    this._steps = 24;
     this._lightSteps = 6;
     this._octaves = 5;
     this._detailOctaves = 4;
     this._useErosion = true;
+    this._lightMode = 0;
+    this._stepLOD = false;
     this._enabled = false;
     this._inScene = true;       // gated off while another world mode is active
     this._inRange = true;
@@ -49,12 +51,14 @@ export class CloudSlabLayer {
       this._lightSteps,
       this._octaves,
       this._detailOctaves,
-      this._useErosion
+      this._useErosion,
+      this._lightMode
     );
 
-    // a unit plane rotated flat (XZ); scaled to cover the board + sky margin
-    const geo = new THREE.PlaneGeometry(1, 1);
-    geo.rotateX(-Math.PI / 2);
+    // a unit box that ENCLOSES the slab volume (scaled in applyParams). Drawn
+    // BackSide so its far faces always cover the volume's screen footprint from
+    // any angle — a flat plane clipped the clouds at grazing views from below.
+    const geo = new THREE.BoxGeometry(1, 1, 1);
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 20;
@@ -102,9 +106,12 @@ export class CloudSlabLayer {
     u.uCloudFar.value = this._boardSize * 4.0;   // bound horizon marching
     u.uCloudCenter.value.set(0, 0, 0);
 
-    // size + place the plane to cover the slab over the board
-    const span = this._boardSize * 4.0;
-    this.mesh.scale.set(span, 1, span);
+    // size + place the enclosing box: horizontal extent just past the radial
+    // fade (clouds are zero beyond uCloudRadius), height = slab thickness with a
+    // hair of margin so the bottom/top planes sit inside the box faces.
+    const horiz = radius * 2.1;
+    const height = Math.max(1, (top - bottom) * 1.04);
+    this.mesh.scale.set(horiz, height, horiz);
     this.mesh.position.set(0, (bottom + top) * 0.5, 0);
 
     // frequencies are user-relative; scale by board size so a slider value maps
@@ -125,6 +132,8 @@ export class CloudSlabLayer {
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;
     u.uCloudSelfShadow.value = q.selfShadow ? 1.0 : 0.0;
     u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
+    this._stepLOD = q.stepLOD;
+    if (!this._stepLOD) u.uCloudStepScale.value = 1.0;
 
     if (params.cloudColor) u.uCloudColor.value.setRGB(...params.cloudColor);
     if (params.cloudShadowColor) u.uCloudShadowColor.value.setRGB(...params.cloudShadowColor);
@@ -142,9 +151,10 @@ export class CloudSlabLayer {
         q.lightSteps !== this._lightSteps ||
         q.octaves !== this._octaves ||
         q.detailOctaves !== this._detailOctaves ||
-        q.useErosion !== this._useErosion;
+        q.useErosion !== this._useErosion ||
+        q.lightMode !== this._lightMode;
     if (needsRebuild) {
-      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion);
+      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion, q.lightMode);
     }
 
     // warm the program in the background on first enable (no first-frame hang)
@@ -153,17 +163,12 @@ export class CloudSlabLayer {
     }
   }
 
-  _compileCurrentMaterial() {
-    if (!this._compile) {
-      this._ready = true;
-      this._warming = false;
-      return Promise.resolve();
-    }
-
-    const material = this.material;
+  // Compile a material in the background without touching the _ready/_warming
+  // gate (used for live rebuilds, where the OLD material stays visible until the
+  // new program is ready). Returns a token to detect superseding rebuilds.
+  _compileMaterial(material) {
     const token = ++this._compileToken;
-    this._ready = false;
-    this._warming = true;
+    if (!this._compile) return { token, promise: Promise.resolve() };
 
     let promise;
     try {
@@ -174,17 +179,36 @@ export class CloudSlabLayer {
 
     const done = promise.catch(() => {});
     this._pendingCompile = { material, promise: done };
+    done.finally(() => {
+      if (this._pendingCompile?.promise === done) this._pendingCompile = null;
+    });
 
-    done.then(() => {
+    return { token, promise: done };
+  }
+
+  // Warm the CURRENT material and flip the _ready gate when done (first-enable
+  // path — clouds stay hidden until the very first program is compiled so there
+  // is no first-frame FXC hang).
+  _compileCurrentMaterial() {
+    if (!this._compile) {
+      this._ready = true;
+      this._warming = false;
+      return Promise.resolve();
+    }
+
+    const material = this.material;
+    this._ready = false;
+    this._warming = true;
+    const { token, promise } = this._compileMaterial(material);
+
+    promise.then(() => {
       if (token === this._compileToken && this.material === material) {
         this._ready = true;
         this._warming = false;
       }
-    }).finally(() => {
-      if (this._pendingCompile?.promise === done) this._pendingCompile = null;
     });
 
-    return done;
+    return promise;
   }
 
   _disposeWhenSafe(material, pending) {
@@ -193,12 +217,13 @@ export class CloudSlabLayer {
     else material.dispose();
   }
 
-  _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion) {
+  _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion, lightMode = this._lightMode) {
     this._steps = steps;
     this._lightSteps = lightSteps;
     this._octaves = octaves;
     this._detailOctaves = detailOctaves;
     this._useErosion = useErosion;
+    this._lightMode = lightMode;
     const previous = this.material;
     const pendingPrevious = this._pendingCompile?.material === previous
       ? this._pendingCompile.promise
@@ -208,7 +233,8 @@ export class CloudSlabLayer {
       lightSteps,
       octaves,
       detailOctaves,
-      useErosion
+      useErosion,
+      lightMode
     );
     const a = previous.uniforms, b = next.uniforms;
     for (const k in b) {
@@ -217,11 +243,32 @@ export class CloudSlabLayer {
       if (av && av.copy && bv && bv.copy) bv.copy(av);
       else b[k].value = a[k].value;
     }
-    this.mesh.material = next;
-    this.material = next;
-    this.mesh.visible = false;
-    this._disposeWhenSafe(previous, pendingPrevious);
-    this._compileCurrentMaterial();
+
+    if (!this._ready) {
+      // First program not shown yet — swap now (nothing visible) and keep
+      // warming; the _ready gate reveals the clouds once compiled.
+      this.mesh.material = next;
+      this.material = next;
+      this.mesh.visible = false;
+      this._disposeWhenSafe(previous, pendingPrevious);
+      this._compileCurrentMaterial();
+      return;
+    }
+
+    // Clouds are already on screen: compile the new program in the BACKGROUND
+    // and keep the old material rendering until it's ready, then swap with no
+    // flicker (mirrors PlanetCloudLayer). Changing raymarch steps no longer
+    // makes the clouds vanish.
+    const { token, promise } = this._compileMaterial(next);
+    promise.then(() => {
+      if (token !== this._compileToken || this.material !== previous) {
+        next.dispose();
+        return;
+      }
+      this.mesh.material = next;
+      this.material = next;
+      this._disposeWhenSafe(previous, pendingPrevious);
+    });
   }
 
   update(dt, cameraPos, sunDir) {
@@ -235,6 +282,13 @@ export class CloudSlabLayer {
     if (!this._inRange) return;
 
     const u = this.material.uniforms;
+    // step-LOD: ramp the effective march steps down to 0.4 toward the cull edge
+    if (this._stepLOD && Number.isFinite(this._maxDistance)) {
+      const near = this._boardSize;
+      const far = this._maxDistance;
+      const f = far > near ? (dist - near) / (far - near) : 0;
+      u.uCloudStepScale.value = Math.max(0.4, Math.min(1.0, 1.0 - f * 0.6));
+    }
     u.uCloudTime.value += dt;
     this._rotation += dt * (this._rotSpeed || 0);
     u.uCloudRotation.value = this._rotation;

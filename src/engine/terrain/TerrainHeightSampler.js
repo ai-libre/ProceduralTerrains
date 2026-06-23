@@ -144,6 +144,24 @@ export class TerrainHeightSampler {
     };
   }
 
+  _dominantBiome(weights, overrides = null) {
+    const painted = overrides ? {
+      desert: clamp((weights.desert ?? 0) + (overrides.desert ?? 0), 0, 1),
+      canyon: clamp((weights.canyon ?? 0) + (overrides.canyon ?? 0), 0, 1),
+      wetland: clamp((weights.wetland ?? 0) + (overrides.wetland ?? 0), 0, 1),
+      mountains: clamp((weights.mountains ?? 0) + (overrides.mountains ?? 0), 0, 1),
+    } : weights;
+    let label = 'Forest';
+    let score = 0.18;
+    for (const [key, value] of Object.entries(painted)) {
+      if (value > score) {
+        score = value;
+        label = key[0].toUpperCase() + key.slice(1);
+      }
+    }
+    return { label, weights: painted };
+  }
+
   _terrace(h, steps) {
     const t = f(h * steps);
     const s = smoothstep32(0.20, 0.80, fract32(t));
@@ -177,6 +195,23 @@ export class TerrainHeightSampler {
       h = f(h * f(f(t * t) * f(3 - f(2 * t))));
     }
     return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
+  }
+
+  shapeAt(x, z) {
+    const u = this.u;
+    return (this.stack && !isLegacyStack(this.stack))
+      ? evalStack2D(this.stack, x, z, this._ctx())
+      : f(this._legacyShape2D(x, z) * f(u.uAmplitude.value));
+  }
+
+  biomeAt(x, z, overrides = null) {
+    const u = this.u;
+    const freq = f(u.uFrequency.value);
+    const px = f(f(f(x) * freq) + f(u.uSeedOffset.value.x));
+    const py = f(f(f(z) * freq) + f(u.uSeedOffset.value.y));
+    const climate = this._climateAt(px, py);
+    const weights = this._biomeWeights(climate);
+    return this._dominantBiome(weights, overrides);
   }
 
   /** Legacy biome-coupled recipe (layers 1-6), h in ~0..1.35 (pre falloff/scale). */
@@ -240,5 +275,28 @@ export class TerrainHeightSampler {
     let nx = hL - hR, ny = 2 * eps, nz = hD - hU;
     const len = Math.hypot(nx, ny, nz) || 1;
     return { x: nx / len, y: ny / len, z: nz / len };
+  }
+
+  sampleSurfaceInfo(x, z, {
+    waterLevel = 0,
+    paintHeightOffset = 0,
+    paintBiomeWeights = null,
+    eps = 2.0,
+  } = {}) {
+    const baseHeight = this.heightAt(x, z);
+    const height = baseHeight + paintHeightOffset;
+    const normal = this.normalAt(x, z, eps);
+    const slope = clamp(1 - normal.y, 0, 1);
+    const biome = this.biomeAt(x, z, paintBiomeWeights);
+    return {
+      baseHeight,
+      height,
+      normal,
+      slope,
+      water: height <= waterLevel + 0.01,
+      biome: biome.label,
+      biomeWeights: biome.weights,
+      noise: this.shapeAt(x, z),
+    };
   }
 }

@@ -99,6 +99,19 @@ export class PaintLayerManager {
     };
   }
 
+  sampleBiomeMask(x, z) {
+    const { px, py } = this.worldToPixel(x, z);
+    const ix = clamp(Math.round(px), 0, this.resolution - 1);
+    const iy = clamp(Math.round(py), 0, this.resolution - 1);
+    const i = (iy * this.resolution + ix) * 4;
+    return {
+      desert: this.biomeData[i] / 255,
+      canyon: this.biomeData[i + 1] / 255,
+      wetland: this.biomeData[i + 2] / 255,
+      mountains: this.biomeData[i + 3] / 255,
+    };
+  }
+
   _heightOffsetFrom(data, px, py) {
     const ix = clamp(Math.round(px), 0, this.resolution - 1);
     const iy = clamp(Math.round(py), 0, this.resolution - 1);

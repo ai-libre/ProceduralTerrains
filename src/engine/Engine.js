@@ -198,6 +198,7 @@ export class Engine {
     this._initControls();
     this._initPaintMode();
     this._initProps();
+    this._bindMinimapSources();
 
     this.controls.setBoardSize(this.boardSize);
     this.controls.reset(this.boardSize);
@@ -347,6 +348,32 @@ export class Engine {
 
   _initProps() {
     this.propsManager = new ProceduralPropsManager(this.scene);
+  }
+
+  _bindMinimapSources() {
+    this.minimap.setSources({
+      controls: this.controls,
+      sampler: this._getMinimapSampler(),
+      getPaintHeightOffset: (x, z) => this._samplePaintHeightOffset(x, z),
+      getPaintBiomeWeights: (x, z) => this.paintMode?.layers?.sampleBiomeMask(x, z) ?? null,
+      getPropsMask: (x, z) => this.paintMode?.layers?.samplePropsMask(x, z) ?? { grass: 0, flowers: 0, mixed: 0 },
+      getWaterLevel: () => this.params.seaLevel,
+      getChunkCount: () => this.params.chunkCount,
+    });
+  }
+
+  _getMinimapSampler() {
+    if (!this._minimapSampler) {
+      this._minimapSampler = new TerrainHeightSampler(this.uniforms, () => ({
+        octaves: Math.round(this.params.octaves),
+        infinite: false,
+      }), this.noiseStack);
+    }
+    return this._minimapSampler;
+  }
+
+  _samplePaintHeightOffset(x, z) {
+    return (this.paintMode?.layers?.sampleHeightOffset(x, z) ?? 0) * (this.paintMode?.state?.layerOpacity ?? 1);
   }
 
   // ------------------------------------------------------------ parameters
@@ -757,6 +784,7 @@ export class Engine {
     this._soloLayerId = solo;
     if (this.heightSampler?.cpu?.setStack) this.heightSampler.cpu.setStack(stack);
     if (this.planetSampler) this.planetSampler.setStack(stack);
+    if (this._minimapSampler?.setStack) this._minimapSampler.setStack(stack);
 
     const next = generateStackGLSL(stack);
     const structural = next.sig !== this._stackSig;
@@ -1215,6 +1243,21 @@ export class Engine {
     this._renderMinimapBase();
   }
 
+  setMinimapConfig(next) {
+    this.minimap.setConfig(next);
+    this._minimapDirtyAt = 0;
+    this._needsRender = true;
+  }
+
+  setMinimapHover(hover) {
+    this.minimap.setHover(hover);
+    this._needsRender = true;
+  }
+
+  getMinimapInfoAt(px, py) {
+    return this.minimap.infoAtCanvas(px, py);
+  }
+
   focusCenter() { this.controls.focusCenter(); }
   setCameraMode(mode) { this.controls.setMode(mode); }
   setCameraView(view) { this.controls.setView(view); }
@@ -1253,7 +1296,7 @@ export class Engine {
       const cpu = new TerrainHeightSampler(this.uniforms, () => ({
         octaves: Math.round(this.params.octaves),
         infinite: this.worldMode === 'infinite',
-      }));
+      }), this.noiseStack);
       this.heightSampler = new GpuHeightSampler({
         renderer: this.renderer,
         scene: this.scene,
@@ -1821,7 +1864,7 @@ export class Engine {
       const cpu = new TerrainHeightSampler(this.uniforms, () => ({
         octaves: Math.round(this.params.octaves),
         infinite: this.worldMode === 'infinite',
-      }));
+      }), this.noiseStack);
       const heightAt = (x, z) => {
         const base = cpu.heightAt(x, z);
         if (this.worldMode !== 'studio') return base;

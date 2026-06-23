@@ -665,6 +665,9 @@ export default function App() {
               baseRef={minimapBaseRef}
               overlayRef={minimapOverlayRef}
               drawerOpen={!!effectivePanel}
+              onConfigChange={(next) => engine()?.setMinimapConfig(next)}
+              onHoverChange={(hover) => engine()?.setMinimapHover(hover)}
+              onHoverInfoRequest={(x, y) => engine()?.getMinimapInfoAt(x, y) ?? null}
             />
           )}
 

@@ -7,14 +7,15 @@ import { renderPanel } from '../panels/index.jsx';
 // Also owns the global hover-tooltip logic (data-tooltip) for its content.
 export default function SideDrawer({ activePanel, ctx, onClose }) {
   const [tooltip, setTooltip] = useState(null);
+  const searchOpen = !!ctx.settingsSearchOpen;
 
   // Escape closes the active panel.
   useEffect(() => {
     if (!activePanel) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape' && !searchOpen) onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activePanel, onClose]);
+  }, [activePanel, onClose, searchOpen]);
 
   // Global tooltip (data-tooltip attributes inside the drawer).
   useEffect(() => {

@@ -1,0 +1,146 @@
+const SETTINGS_INDEX = [
+  // Terrain
+  { panelId: 'terrain', tabId: 'shape', sectionLabel: 'Shape', settingId: 'terrain.heightScale', label: 'Height Scale', keywords: 'height elevation mountain terrain amplitude', aliases: 'height map height noise' },
+  { panelId: 'terrain', tabId: 'shape', sectionLabel: 'Shape', settingId: 'terrain.seaLevel', label: 'Sea Level', keywords: 'water ocean coast shoreline sea' },
+  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.noiseScale', label: 'Noise Scale', keywords: 'height noise detail fractal terrain' },
+  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.noiseStrength', label: 'Noise Strength', keywords: 'height noise amplitude terrain' },
+  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.octaves', label: 'Octaves', keywords: 'height noise detail fbm terrain' },
+  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.persistence', label: 'Persistence', keywords: 'height noise roughness fbm' },
+  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.lacunarity', label: 'Lacunarity', keywords: 'height noise frequency fbm' },
+  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.ridge', label: 'Ridge Intensity', keywords: 'height noise ridge mountain alpine' },
+  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.warp', label: 'Domain Warp', keywords: 'height noise warp fold distortion' },
+  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.falloff', label: 'Island Falloff', keywords: 'height coast island edge falloff' },
+  { panelId: 'terrain', tabId: 'surface', sectionLabel: 'Surface', settingId: 'terrain.normalStrength', label: 'Normal Strength', keywords: 'surface shading detail normals' },
+  { panelId: 'terrain', tabId: 'surface', sectionLabel: 'Surface', settingId: 'terrain.aoStrength', label: 'Ambient Occlusion', keywords: 'surface shading crevice darkening' },
+  { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.heightMap', label: 'Height Map', keywords: 'height import replace blend map' },
+  { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.noiseMap', label: 'Noise Map', keywords: 'noise import replace blend map' },
+  { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.biomeMap', label: 'Biome Map', keywords: 'biome import replace blend map' },
+
+  // Biomes
+  { panelId: 'biomes', settingId: 'biomes.biomeScale', label: 'Biome Density', keywords: 'biome density distribution climate map' },
+  { panelId: 'biomes', settingId: 'biomes.tempBias', label: 'Temperature', keywords: 'biome climate heat cold' },
+  { panelId: 'biomes', settingId: 'biomes.moistScale', label: 'Moisture Scale', keywords: 'biome climate humidity wet dry' },
+  { panelId: 'biomes', settingId: 'biomes.moistBias', label: 'Moisture Bias', keywords: 'biome climate humidity wet dry' },
+  { panelId: 'biomes', settingId: 'biomes.snowLine', label: 'Snow Line', keywords: 'biome climate snow altitude' },
+  { panelId: 'biomes', settingId: 'biomes.biomeDebug', label: 'Biome Debug', keywords: 'biome debug overlay inspection' },
+
+  // World
+  { panelId: 'world', settingId: 'world.chunkCount', label: 'Chunk Count', keywords: 'world grid streaming tiles' },
+  { panelId: 'world', settingId: 'world.chunkSize', label: 'Chunk Size', keywords: 'world grid streaming tiles' },
+  { panelId: 'world', settingId: 'world.chunkGrid', label: 'Chunk Grid', keywords: 'world grid debug overlay' },
+  { panelId: 'world', settingId: 'world.planetRadius', label: 'Planet Radius', keywords: 'planet sphere radius curvature' },
+  { panelId: 'world', settingId: 'world.planetFaceGrid', label: 'Surface Detail', keywords: 'planet face grid chunk detail' },
+
+  // Water
+  { panelId: 'water', settingId: 'water.waterAnim', label: 'Water Animation', keywords: 'water waves ocean motion' },
+
+  // Planet style / colors
+  { panelId: 'planet', sectionLabel: 'Water', settingId: 'planet.water.deep', label: 'Deep Water', keywords: 'water color ocean deep' },
+  { panelId: 'planet', sectionLabel: 'Water', settingId: 'planet.water.shallow', label: 'Shallow', keywords: 'water color shore coast shallow' },
+  { panelId: 'planet', sectionLabel: 'Water', settingId: 'planet.water.foam', label: 'Foam', keywords: 'water color waves foam shoreline' },
+  { panelId: 'planet', sectionLabel: 'Palette', settingId: 'planet.paletteSaturation', label: 'Saturation', keywords: 'palette color tuning contrast' },
+  { panelId: 'planet', sectionLabel: 'Palette', settingId: 'planet.paletteContrast', label: 'Contrast', keywords: 'palette color tuning contrast' },
+
+  // Performance
+  { panelId: 'performance', tabId: 'overview', settingId: 'performance.preset', label: 'Preset', keywords: 'quality profile performance' },
+  { panelId: 'performance', tabId: 'overview', settingId: 'performance.autoPerf', label: 'Auto Performance Mode', keywords: 'automatic fps performance' },
+  { panelId: 'performance', tabId: 'overview', settingId: 'performance.onDemandStudio', label: 'Pause When Idle', keywords: 'idle redraw battery performance' },
+  { panelId: 'performance', tabId: 'overview', settingId: 'performance.renderScale', label: 'Render Scale', keywords: 'resolution pixel dpr scale' },
+  { panelId: 'performance', tabId: 'lod', settingId: 'performance.resolutionScale', label: 'Terrain Resolution', keywords: 'lod mesh detail' },
+  { panelId: 'performance', tabId: 'lod', settingId: 'performance.lodDistanceScale', label: 'LOD Distance Scale', keywords: 'lod distance scale' },
+  { panelId: 'performance', tabId: 'streaming', settingId: 'performance.viewRadius', label: 'Chunk Load Radius', keywords: 'streaming load radius chunks' },
+  { panelId: 'performance', tabId: 'water', settingId: 'performance.waterQuality', label: 'Water Quality', keywords: 'water quality reflection detail' },
+  { panelId: 'performance', tabId: 'water', settingId: 'performance.waterReflection', label: 'Water Reflection', keywords: 'water specular reflection' },
+  { panelId: 'performance', tabId: 'water', settingId: 'performance.waterDetail', label: 'Water Detail', keywords: 'water ripple detail' },
+  { panelId: 'performance', tabId: 'water', settingId: 'performance.waterWaves', label: 'Wave Strength', keywords: 'water waves motion complexity' },
+  { panelId: 'performance', tabId: 'water', settingId: 'performance.underwaterEffect', label: 'Underwater Effect', keywords: 'water underwater fog tint' },
+  { panelId: 'performance', tabId: 'water', settingId: 'performance.waterDistance', label: 'Water Distance', keywords: 'water range fade' },
+  { panelId: 'performance', tabId: 'fog', settingId: 'performance.fogDistance', label: 'Fog Distance', keywords: 'fog atmosphere visibility' },
+  { panelId: 'performance', tabId: 'clouds', settingId: 'performance.cloudSteps', label: 'Raymarch Steps', keywords: 'cloud steps quality performance' },
+  { panelId: 'performance', tabId: 'clouds', settingId: 'performance.cloudLightSteps', label: 'Shadow Steps', keywords: 'cloud shadow steps performance' },
+  { panelId: 'performance', tabId: 'clouds', settingId: 'performance.cloudOctaves', label: 'Base Noise Octaves', keywords: 'cloud noise octaves' },
+  { panelId: 'performance', tabId: 'clouds', settingId: 'performance.cloudDetailOctaves', label: 'Detail Noise Octaves', keywords: 'cloud noise detail octaves' },
+  { panelId: 'performance', tabId: 'clouds', settingId: 'performance.cloudMaxDistance', label: 'Max Distance', keywords: 'cloud distance visibility culling' },
+
+  // Sky / lighting
+  { panelId: 'skybox', settingId: 'skybox.timeOfDay', label: 'Time of Day', keywords: 'sun sky day night time' },
+  { panelId: 'skybox', settingId: 'skybox.skyboxBrightness', label: 'Sky Brightness', keywords: 'sky atmosphere brightness' },
+  { panelId: 'skybox', settingId: 'skybox.skyboxHaze', label: 'Horizon Haze', keywords: 'sky atmosphere haze' },
+  { panelId: 'skybox', settingId: 'skybox.skyboxStars', label: 'Night Stars', keywords: 'sky stars night' },
+  { panelId: 'lighting', settingId: 'lighting.sunAzimuth', label: 'Sun Azimuth', keywords: 'sun lighting direction' },
+  { panelId: 'lighting', settingId: 'lighting.sunElevation', label: 'Sun Elevation', keywords: 'sun lighting direction' },
+  { panelId: 'lighting', settingId: 'lighting.sunColor', label: 'Sun Color', keywords: 'sun lighting color' },
+  { panelId: 'lighting', settingId: 'lighting.sunIntensity', label: 'Sun Intensity', keywords: 'sun lighting brightness' },
+  { panelId: 'lighting', settingId: 'lighting.fogDensity', label: 'Fog Density', keywords: 'fog atmosphere density' },
+  { panelId: 'lighting', settingId: 'lighting.skyAmbient', label: 'Sky Ambient', keywords: 'ambient sky bounce lighting' },
+  { panelId: 'lighting', settingId: 'lighting.groundBounce', label: 'Ground Bounce', keywords: 'bounce lighting shadow' },
+
+  // Clouds / props / debug / export
+  { panelId: 'clouds', settingId: 'clouds.cloudCoverage', label: 'Coverage', keywords: 'cloud density cover sky' },
+  { panelId: 'clouds', settingId: 'clouds.cloudDensity', label: 'Density', keywords: 'cloud thickness opacity' },
+  { panelId: 'clouds', settingId: 'clouds.cloudSoftness', label: 'Softness', keywords: 'cloud edge softness' },
+  { panelId: 'debug', settingId: 'debug.autoUpdate', label: 'Auto Update', keywords: 'debug generation rebuild' },
+  { panelId: 'debug', settingId: 'debug.freezeCulling', label: 'Freeze Culling', keywords: 'debug culling freeze' },
+  { panelId: 'debug', settingId: 'debug.freezeLod', label: 'Freeze LOD', keywords: 'debug lod freeze' },
+  { panelId: 'debug', settingId: 'debug.forceRender', label: 'Force Render', keywords: 'debug render fps' },
+  { panelId: 'debug', settingId: 'debug.disableHeightBake', label: 'Disable Height Bake', keywords: 'debug height bake' },
+  { panelId: 'export', settingId: 'export.format', label: 'Format', keywords: 'export file glb obj' },
+];
+
+const normalizeText = (value) => String(value ?? '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim();
+
+function scoreEntry(entry, q, tokens) {
+  const haystack = normalizeText([
+    entry.label,
+    entry.sectionLabel,
+    entry.panelId,
+    entry.keywords,
+    entry.aliases,
+  ].filter(Boolean).join(' '));
+  if (!haystack || !haystack.includes(q)) {
+    if (!tokens.every((token) => haystack.includes(token))) return 0;
+  }
+
+  let score = 0;
+  const label = normalizeText(entry.label);
+  const section = normalizeText(entry.sectionLabel);
+  const aliases = normalizeText(entry.aliases);
+
+  if (label === q) score += 1200;
+  if (label.startsWith(q)) score += 600;
+  if (label.includes(q)) score += 300;
+  if (section && section.includes(q)) score += 120;
+  if (aliases && aliases.includes(q)) score += 180;
+  if (haystack.startsWith(q)) score += 80;
+  score += Math.max(0, 60 - haystack.indexOf(q));
+  for (const token of tokens) {
+    if (label.includes(token)) score += 40;
+    if (section.includes(token)) score += 20;
+    if (aliases.includes(token)) score += 30;
+  }
+
+  return score;
+}
+
+export function searchSettings(query, isPanelAvailable = () => true) {
+  const q = normalizeText(query);
+  if (!q) return [];
+
+  const tokens = q.split(/\s+/).filter(Boolean);
+  return SETTINGS_INDEX
+    .map((entry) => {
+      if (!isPanelAvailable(entry.panelId)) return null;
+      const score = scoreEntry(entry, q, tokens);
+      if (!score) return null;
+      return { ...entry, score };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+}
+
+export { SETTINGS_INDEX };

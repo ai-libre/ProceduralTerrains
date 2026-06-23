@@ -1,17 +1,23 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 export default function CollapsibleGroup({
   title,
   icon,
   defaultOpen = false,
+  forceOpen = false,
   statusDot,
+  settingId,
   children,
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
+  useEffect(() => {
+    if (forceOpen) setOpen(true);
+  }, [forceOpen]);
+
   return (
-    <section className={`panel-group collapsible-group${open ? ' open' : ''}`}>
+    <section className={`panel-group collapsible-group${open ? ' open' : ''}`} data-setting-id={settingId}>
       <button
         type="button"
         className="panel-group-header panel-group-toggle"

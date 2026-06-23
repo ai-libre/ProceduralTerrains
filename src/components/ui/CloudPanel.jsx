@@ -94,18 +94,19 @@ export default function CloudPanel({ params, onParam, perf, onPerfSetting, onClo
         value={enabled}
         onChange={(v) => onParam('cloudsEnabled', v)}
         info="Show the volumetric cloud shell around the planet (planet mode)."
+        settingId="clouds.cloudsEnabled"
       />
 
       {enabled && (
         <>
           <div className="subsection-label">Shape</div>
           {SHAPE_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} />
+          <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`clouds.${def.key}`} />
           ))}
 
           <div className="subsection-label">Shell</div>
           {SHELL_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} />
+          <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`clouds.${def.key}`} />
           ))}
 
           <div className="subsection-label">Noise</div>
@@ -115,19 +116,20 @@ export default function CloudPanel({ params, onParam, perf, onPerfSetting, onClo
             options={CLOUD_NOISE_VARIANTS}
             onChange={(v) => onParam('cloudNoiseVariant', v)}
             info="Changes the cloud density field shape without changing raymarch quality."
+            settingId="clouds.cloudNoiseVariant"
           />
           {NOISE_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} />
+            <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`clouds.${def.key}`} />
           ))}
 
           <div className="subsection-label">Motion</div>
           {MOTION_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} />
+            <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`clouds.${def.key}`} />
           ))}
 
           <div className="subsection-label">Lighting</div>
           {LIGHT_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} />
+            <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`clouds.${def.key}`} />
           ))}
           {COLOR_FIELDS.map(({ key, label, info, def }) => (
             <div className="color-field" key={key}>
@@ -145,6 +147,7 @@ export default function CloudPanel({ params, onParam, perf, onPerfSetting, onClo
             value={p.cloudSelfShadow !== false}
             onChange={(v) => onPerfSetting('cloudSelfShadow', v)}
             info="Secondary sun-direction march for soft self-shadowing (costlier). Shared with Performance settings."
+            settingId="performance.cloudSelfShadow"
           />
 
           <div className="subsection-label">Performance</div>
@@ -154,6 +157,7 @@ export default function CloudPanel({ params, onParam, perf, onPerfSetting, onClo
             options={RESOLUTION_OPTIONS}
             onChange={handleResolutionChange}
             info="Raymarch step count. Higher = smoother clouds, lower FPS. Shared with Performance settings."
+            settingId="performance.cloudSteps"
           />
           <SelectRow
             label="Fallback Mode"
@@ -161,11 +165,13 @@ export default function CloudPanel({ params, onParam, perf, onPerfSetting, onClo
             options={FALLBACK_OPTIONS}
             onChange={(v) => onPerfSetting('cloudFallback', v)}
             info="Safe modes for weaker devices: Lite caps steps and disables self-shadowing; Off hides clouds."
+            settingId="performance.cloudFallback"
           />
           <SliderCtl
             def={{ key: 'cloudMaxDistance', label: 'Max Distance', min: 1.5, max: 12, step: 0.5, digits: 1, unit: '×', info: distInfo }}
             value={p.cloudMaxDistance ?? 6.0}
             onChange={(v) => onPerfSetting('cloudMaxDistance', v)}
+            settingId="performance.cloudMaxDistance"
           />
         </>
       )}

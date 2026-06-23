@@ -14,6 +14,7 @@ export default function PlanetStylePanel({
   onTuning,
   onExportStyle,
   onImportStyle,
+  settingsTarget,
   embedded = false,
   paletteOnly = false,
 }) {
@@ -30,6 +31,7 @@ export default function PlanetStylePanel({
       onTuning={onTuning}
       onExport={onExportStyle}
       onImport={onImportStyle}
+      settingsTarget={settingsTarget}
     />
   );
 

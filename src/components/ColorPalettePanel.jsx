@@ -84,10 +84,10 @@ const TUNING_SCHEMA = [
   },
 ];
 
-function PaletteSwatch({ colorKey, rgb, onChange }) {
+function PaletteSwatch({ colorKey, rgb, onChange, settingId }) {
   const hex = colorToHex(rgb ?? [0.5, 0.5, 0.5]);
   return (
-    <label className="palette-color-row" title={COLOR_LABELS[colorKey]}>
+    <label className="palette-color-row" title={COLOR_LABELS[colorKey]} data-setting-id={settingId}>
       <span className="palette-color-chip" style={{ background: hex }} />
       <span className="palette-color-name">{COLOR_LABELS[colorKey]}</span>
       <ColorInput
@@ -99,10 +99,11 @@ function PaletteSwatch({ colorKey, rgb, onChange }) {
   );
 }
 
-function PaletteGroup({ group, palette, open, onToggle, onColorChange }) {
+function PaletteGroup({ group, palette, open, onToggle, onColorChange, settingId, forceOpen = false }) {
+  const isOpen = forceOpen || open;
   return (
-    <div className={`palette-group${open ? ' open' : ''}`}>
-      <button type="button" className="palette-group-header" onClick={onToggle} aria-expanded={open}>
+    <div className={`palette-group${isOpen ? ' open' : ''}`} data-setting-id={settingId}>
+      <button type="button" className="palette-group-header" onClick={onToggle} aria-expanded={isOpen}>
         <span className="palette-group-dots">
           {group.keys.map((key) => (
             <span
@@ -113,13 +114,13 @@ function PaletteGroup({ group, palette, open, onToggle, onColorChange }) {
           ))}
         </span>
         <span className="palette-group-label">{group.label}</span>
-        <span className={`palette-group-chevron${open ? ' open' : ''}`} aria-hidden>
+        <span className={`palette-group-chevron${isOpen ? ' open' : ''}`} aria-hidden>
           <svg viewBox="0 0 16 16" width="12" height="12">
             <path d="M4 6l4 4 4-4" stroke="currentColor" fill="none" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
         </span>
       </button>
-      {open && (
+      {isOpen && (
         <div className="palette-group-body">
           {group.keys.map((key) => (
             <PaletteSwatch
@@ -127,6 +128,7 @@ function PaletteGroup({ group, palette, open, onToggle, onColorChange }) {
               colorKey={key}
               rgb={palette[key]}
               onChange={onColorChange}
+              settingId={`planet.${group.id}.${key}`}
             />
           ))}
         </div>
@@ -145,6 +147,7 @@ export default function ColorPalettePanel({
   onTuning,
   onExport,
   onImport,
+  settingsTarget,
 }) {
   const palette = planetStyle?.palette ?? {};
   const paletteGenRev = planetStyle?.paletteGenRev ?? 0;
@@ -152,6 +155,7 @@ export default function ColorPalettePanel({
   const [genType, setGenType] = useState('random');
   const [genSeed, setGenSeed] = useState(() => String(terrainSeed ?? Date.now()));
   const [openGroups, setOpenGroups] = useState({ water: true, vegetation: true });
+  const targetId = settingsTarget?.settingId ?? null;
 
   const readSeed = () => {
     const raw = seedInputRef.current?.value ?? genSeed;
@@ -315,6 +319,8 @@ export default function ColorPalettePanel({
             open={!!openGroups[group.id]}
             onToggle={() => toggleGroup(group.id)}
             onColorChange={onColorChange}
+            settingId={`planet.${group.id}`}
+            forceOpen={targetId?.startsWith(`planet.${group.id}`)}
           />
         ))}
       </div>
@@ -327,6 +333,7 @@ export default function ColorPalettePanel({
             def={def}
             value={planetStyle?.[def.key] ?? 1}
             onChange={(v) => onTuning(def.key, v)}
+            settingId={`planet.${def.key}`}
           />
         ))}
       </div>

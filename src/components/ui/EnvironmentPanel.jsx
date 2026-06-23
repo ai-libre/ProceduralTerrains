@@ -110,9 +110,10 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
           def={def}
           value={params[def.key]}
           onChange={(v) => onParam(def.key, v)}
+          settingId={`lighting.${def.key}`}
         />
       ))}
-      <div className="color-field">
+      <div className="color-field" data-setting-id="lighting.sunColor">
         <div className="label-with-icon" data-tooltip="Color tint of the direct sunlight">
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
@@ -136,6 +137,7 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
         def={SUN_INTENSITY}
         value={style.sunIntensity ?? 1.25}
         onChange={(v) => onTuning('sunIntensity', v)}
+        settingId="lighting.sunIntensity"
       />
 
       <div className="subsection-label">Atmosphere</div>
@@ -143,9 +145,10 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
         def={FOG_SLIDER}
         value={params.fogDensity}
         onChange={(v) => onParam('fogDensity', v)}
+        settingId="lighting.fogDensity"
       />
       {ATMOSPHERE_COLORS.map(({ key, label, icon, info }) => (
-        <div className="color-field" key={key}>
+        <div className="color-field" key={key} data-setting-id={`lighting.${key}`}>
           <div className="label-with-icon" data-tooltip={info}>
             {icon && <span className="setting-icon">{icon}</span>}
             <span className="setting-label">{label}</span>

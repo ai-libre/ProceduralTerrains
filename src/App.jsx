@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Engine } from './engine/Engine.js';
 import { DEFAULT_PARAMS } from './engine/presets.js';
 import { clonePlanetStyle } from './engine/style/PlanetStyleConfig.js';
+import { colorToHex } from './engine/style/ColorPalette.js';
+import { formatTimeOfDay } from './engine/sky/TimeOfDay.js';
 import { useLoading, blockingTask, nonBlockingTask } from './state/loading.jsx';
-import { panelAvailable } from './components/panels/index.jsx';
+import { panelAvailable, PANEL_ORDER, getPanelDisplay } from './components/panels/index.jsx';
+import { searchSettings } from './components/panels/settingsSearch.js';
 import TopBar from './components/TopBar.jsx';
 import LeftToolbar from './components/ui/LeftToolbar.jsx';
 import SideDrawer from './components/ui/SideDrawer.jsx';
+import SettingsSearchOverlay from './components/ui/SettingsSearchOverlay.jsx';
 import BottomToolbar from './components/BottomToolbar.jsx';
 import WorldModeBar from './components/WorldModeBar.jsx';
 import StatusBar from './components/StatusBar.jsx';
@@ -19,6 +23,13 @@ import ToastContainer, { classifyToast } from './components/ui/Toast.jsx';
 import { useLanding } from './landing/landingContext.jsx';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
+
+const hex = (rgb) => colorToHex(Array.isArray(rgb) ? rgb : [0.5, 0.5, 0.5]);
+const yesNo = (value) => (value ? 'On' : 'Off');
+const num = (value, digits = 2, suffix = '') => {
+  if (!Number.isFinite(value)) return '—';
+  return `${Number(value).toFixed(digits)}${suffix}`;
+};
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -65,6 +76,10 @@ export default function App() {
   const [visibleChunks, setVisibleChunks] = useState(DEFAULT_PARAMS.chunkCount * DEFAULT_PARAMS.chunkCount);
   const [culledChunks, setCulledChunks] = useState(0);
   const [perf, setPerf] = useState(null);
+  const [settingsSearchOpen, setSettingsSearchOpen] = useState(false);
+  const [settingsSearchQuery, setSettingsSearchQuery] = useState('');
+  const [settingsSearchIndex, setSettingsSearchIndex] = useState(0);
+  const [settingsTarget, setSettingsTarget] = useState(null);
 
   // ---- toasts ----
   const [toasts, setToasts] = useState([]);
@@ -315,6 +330,200 @@ export default function App() {
   const studioLike = isStudio || (isPlanet && !playerMode);
   const showStudioUI = !previewMode && !paintMode && studioLike;
   const showToolPanels = !previewMode && !paintMode && !planetWalking;
+  const searchEnabled = showToolPanels;
+
+  const formatSearchValue = useCallback((item) => {
+    const id = item.settingId;
+    const paramsStyle = params.planetStyle ?? {};
+    const palette = paramsStyle.palette ?? {};
+
+    switch (id) {
+      case 'terrain.heightScale': return num(params.heightScale, 0, ' m');
+      case 'terrain.seaLevel': return num(params.seaLevel, 0, ' m');
+      case 'terrain.noiseScale': return num(params.noiseScale, 1);
+      case 'terrain.noiseStrength': return num(params.noiseStrength, 2);
+      case 'terrain.octaves': return String(params.octaves);
+      case 'terrain.persistence': return num(params.persistence, 2);
+      case 'terrain.lacunarity': return num(params.lacunarity, 2);
+      case 'terrain.ridge': return num(params.ridge, 2);
+      case 'terrain.warp': return num(params.warp, 2);
+      case 'terrain.falloff': return num(params.falloff, 2);
+      case 'terrain.normalStrength': return num(params.normalStrength, 2);
+      case 'terrain.aoStrength': return num(params.aoStrength, 2);
+      case 'terrain.heightMap':
+      case 'terrain.noiseMap':
+      case 'terrain.biomeMap':
+        return params.importedMaps?.[id.split('.')[1]]?.fileName ?? 'No file';
+
+      case 'biomes.biomeScale': return num(params.biomeScale, 2);
+      case 'biomes.tempBias': return num(params.tempBias, 2);
+      case 'biomes.moistScale': return num(params.moistScale, 2);
+      case 'biomes.moistBias': return num(params.moistBias, 2);
+      case 'biomes.snowLine': return num(params.snowLine, 2);
+      case 'biomes.biomeDebug': return yesNo(params.biomeDebug);
+
+      case 'world.chunkCount': return `${params.chunkCount} × ${params.chunkCount}`;
+      case 'world.chunkSize': return String(params.chunkSize);
+      case 'world.chunkGrid': return yesNo(params.chunkGrid);
+      case 'world.planetRadius': return `${Math.round(params.planetRadius / 1000)}k`;
+      case 'world.planetFaceGrid': return `${params.planetFaceGrid} / face`;
+
+      case 'water.waterAnim': return yesNo(params.waterAnim);
+
+      case 'planet.water.deep': return hex(palette.deep);
+      case 'planet.water.shallow': return hex(palette.shallow);
+      case 'planet.water.foam': return hex(palette.foam);
+      case 'planet.paletteSaturation': return num(paramsStyle.paletteSaturation ?? 1, 2);
+      case 'planet.paletteContrast': return num(paramsStyle.paletteContrast ?? 1, 2);
+
+      case 'performance.preset': return perf?.preset ?? 'high';
+      case 'performance.autoPerf': return yesNo(perf?.autoPerf);
+      case 'performance.onDemandStudio': return yesNo(perf?.onDemandStudio);
+      case 'performance.renderScale': return num(perf?.renderScale, 2, 'x');
+      case 'performance.resolutionScale': return num(perf?.resolutionScale, 2, 'x');
+      case 'performance.lodDistanceScale': return num(perf?.lodDistanceScale, 2, 'x');
+      case 'performance.viewRadius': return `${perf?.viewRadius ?? '—'} chunks`;
+      case 'performance.maxCreatesPerFrame': return String(perf?.maxCreatesPerFrame ?? '—');
+      case 'performance.triangleBudget': return `${num((perf?.triangleBudget ?? 0) / 1e6, 1)}M`;
+      case 'performance.cullingAggressiveness': return num(perf?.cullingAggressiveness, 1);
+      case 'performance.waterQuality':
+        return ({ 0: 'Low', 1: 'Medium', 2: 'High' }[perf?.waterQuality] ?? 'Custom');
+      case 'performance.waterReflection': return num(perf?.waterReflection, 2, 'x');
+      case 'performance.waterDetail': return num(perf?.waterDetail, 2, 'x');
+      case 'performance.waterWaves': return num(perf?.waterWaves, 2, 'x');
+      case 'performance.underwaterEffect': return yesNo(perf?.underwaterEffect !== false);
+      case 'performance.waterDistance': return num(perf?.waterDistance, 2, 'x');
+      case 'performance.fogDistance': return num(perf?.fogDistance, 2, 'x');
+      case 'performance.cloudFallback': return perf?.cloudFallback ?? 'none';
+      case 'performance.cloudSteps': return `${perf?.cloudSteps ?? '—'} steps`;
+      case 'performance.cloudSelfShadow': return yesNo(perf?.cloudSelfShadow !== false);
+      case 'performance.cloudLightMode': return yesNo(!!perf?.cloudLightMode);
+      case 'performance.cloudLightSteps': return `${perf?.cloudLightSteps ?? '—'} steps`;
+      case 'performance.cloudStepLOD': return yesNo(!!perf?.cloudStepLOD);
+      case 'performance.cloudOctaves': return String(perf?.cloudOctaves ?? '—');
+      case 'performance.cloudDetailOctaves': return String(perf?.cloudDetailOctaves ?? '—');
+      case 'performance.cloudUseErosion': return yesNo(perf?.cloudUseErosion !== false);
+      case 'performance.cloudMaxDistance': return num(perf?.cloudMaxDistance, 1, 'x');
+
+      case 'skybox.timeOfDay': return formatTimeOfDay(timeOfDay);
+      case 'skybox.skyboxEnabled': return yesNo(params.skyboxEnabled !== false);
+      case 'skybox.skyboxBrightness': return num(params.skyboxBrightness ?? 1, 2);
+      case 'skybox.skyboxHaze': return num(params.skyboxHaze ?? 0.55, 2);
+      case 'skybox.skyboxStars': return yesNo(params.skyboxStars !== false);
+
+      case 'lighting.sunAzimuth': return `${Math.round(params.sunAzimuth ?? 0)}°`;
+      case 'lighting.sunElevation': return `${Math.round(params.sunElevation ?? 0)}°`;
+      case 'lighting.sunColor': return hex(paramsStyle.sunColor);
+      case 'lighting.sunIntensity': return num(paramsStyle.sunIntensity ?? 1.25, 2);
+      case 'lighting.fogDensity': return num(params.fogDensity, 2);
+      case 'lighting.skyAmbient': return hex(paramsStyle.skyAmbient);
+      case 'lighting.groundBounce': return hex(paramsStyle.groundBounce);
+
+      case 'clouds.cloudsEnabled': return yesNo(params.cloudsEnabled);
+      case 'clouds.cloudCoverage': return num(params.cloudCoverage ?? 0, 2);
+      case 'clouds.cloudDensity': return num(params.cloudDensity ?? 0, 2);
+      case 'clouds.cloudSoftness': return num(params.cloudSoftness ?? 0, 2);
+      case 'clouds.cloudAltitude': return num(params.cloudAltitude ?? 0, 0, 'm');
+      case 'clouds.cloudThickness': return num(params.cloudThickness ?? 0, 0, 'm');
+      case 'clouds.cloudScale': return num(params.cloudScale ?? 0, 1);
+      case 'clouds.cloudDetailScale': return num(params.cloudDetailScale ?? 0, 1);
+      case 'clouds.cloudDetailStrength': return num(params.cloudDetailStrength ?? 0, 2);
+      case 'clouds.cloudErosionScale': return num(params.cloudErosionScale ?? 0, 1);
+      case 'clouds.cloudErosionStrength': return num(params.cloudErosionStrength ?? 0, 2);
+      case 'clouds.cloudWindDir': return `${Math.round(params.cloudWindDir ?? 0)}°`;
+      case 'clouds.cloudWindSpeed': return num(params.cloudWindSpeed ?? 0, 2);
+      case 'clouds.cloudRotationSpeed': return num(params.cloudRotationSpeed ?? 0, 2);
+      case 'clouds.cloudLightAbsorption': return num(params.cloudLightAbsorption ?? 0, 2);
+      case 'clouds.cloudShadowStrength': return num(params.cloudShadowStrength ?? 0, 2);
+      case 'clouds.cloudScatteringStrength': return num(params.cloudScatteringStrength ?? 0, 2);
+      case 'clouds.cloudNoiseVariant': return String(params.cloudNoiseVariant ?? 'default');
+      case 'clouds.cloudColor': return hex(params.cloudColor);
+      case 'clouds.cloudShadowColor': return hex(params.cloudShadowColor);
+
+      case 'debug.autoUpdate': return yesNo(params.autoUpdate);
+      case 'debug.freezeCulling': return yesNo(!!debugFlags.freezeCulling);
+      case 'debug.freezeLod': return yesNo(!!debugFlags.freezeLod);
+      case 'debug.forceRender': return yesNo(!!debugFlags.forceRender);
+      case 'debug.disableHeightBake': return yesNo(!!debugFlags.disableHeightBake);
+
+      case 'export.format': return 'GLB / GLTF';
+      default:
+        return 'Set';
+    }
+  }, [params, perf, timeOfDay, debugFlags]);
+
+  const settingsSearchResults = useMemo(() => {
+    if (!settingsSearchOpen || !searchEnabled) return [];
+    return searchSettings(settingsSearchQuery, (panelId) => panelAvailable(panelId, worldMode))
+      .map((item) => ({ ...item, valueText: formatSearchValue(item) }));
+  }, [settingsSearchOpen, settingsSearchQuery, searchEnabled, worldMode, formatSearchValue]);
+
+  const groupedSettingsSearchResults = useMemo(() => {
+    const map = new Map();
+    settingsSearchResults.forEach((item, flatIndex) => {
+      const entry = map.get(item.panelId) ?? {
+        panelId: item.panelId,
+        panelLabel: getPanelDisplay(item.panelId, worldMode).label,
+        items: [],
+      };
+      entry.items.push({ ...item, flatIndex });
+      map.set(item.panelId, entry);
+    });
+    const order = new Map(PANEL_ORDER.map((id, index) => [id, index]));
+    return [...map.values()]
+      .sort((a, b) => (order.get(a.panelId) ?? 999) - (order.get(b.panelId) ?? 999))
+      .map((group) => ({ ...group, items: group.items.sort((a, b) => a.flatIndex - b.flatIndex) }));
+  }, [settingsSearchResults, worldMode]);
+
+  const openSettingsSearch = () => {
+    if (!searchEnabled) return;
+    setSettingsSearchOpen(true);
+  };
+
+  const closeSettingsSearch = () => {
+    setSettingsSearchOpen(false);
+    setSettingsSearchIndex(0);
+  };
+
+  const confirmSettingsSearch = (index = settingsSearchIndex) => {
+    const item = settingsSearchResults[index];
+    if (!item) return;
+    setActivePanel(item.panelId);
+    setSettingsTarget({
+      panelId: item.panelId,
+      tabId: item.tabId ?? null,
+      sectionLabel: item.sectionLabel ?? null,
+      settingId: item.settingId,
+      label: item.label,
+    });
+    closeSettingsSearch();
+  };
+
+  useEffect(() => {
+    if (!searchEnabled && settingsSearchOpen) closeSettingsSearch();
+  }, [searchEnabled, settingsSearchOpen]);
+
+  useEffect(() => {
+    setSettingsSearchIndex((cur) => (settingsSearchResults.length ? Math.min(cur, settingsSearchResults.length - 1) : 0));
+  }, [settingsSearchResults.length]);
+
+  useEffect(() => {
+    if (!searchEnabled) return;
+    const onKeyDown = (e) => {
+      const key = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && key === 'k') {
+        e.preventDefault();
+        openSettingsSearch();
+        return;
+      }
+      if (e.key === 'Escape' && settingsSearchOpen) {
+        e.preventDefault();
+        closeSettingsSearch();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [settingsSearchOpen, searchEnabled]);
 
   const togglePanel = (id) => setActivePanel((cur) => (cur === id ? null : id));
   const effectivePanel = showToolPanels && panelAvailable(activePanel, worldMode) ? activePanel : null;
@@ -337,8 +546,39 @@ export default function App() {
     eng.setLandingShowcase(landingActive);
   }, [landingActive]);
 
+  useEffect(() => {
+    if (!settingsTarget || !showToolPanels) return undefined;
+    let cancelled = false;
+    let attempts = 0;
+    const run = () => {
+      if (cancelled) return;
+      const target = document.querySelector(`[data-setting-id="${settingsTarget.settingId}"]`);
+      if (target) {
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        target.classList.add('setting-target-flash');
+        window.setTimeout(() => target.classList.remove('setting-target-flash'), 1200);
+        setSettingsTarget(null);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 12) {
+        window.setTimeout(run, 80);
+      } else {
+        setSettingsTarget(null);
+      }
+    };
+    const timer = window.setTimeout(run, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [settingsTarget, showToolPanels, effectivePanel]);
+
   const ctx = {
     params, worldMode, onParam,
+    settingsTarget,
+    settingsSearchOpen,
+    onSettingsTargetHandled: () => setSettingsTarget(null),
     onPreset: (key) => engine().applyPresetByKey(key),
     onRandomizeSeed: () => engine().randomizeSeed(),
     onRegenerate,
@@ -396,6 +636,22 @@ export default function App() {
 
         <div className="viewport-area">
           <canvas id="viewport" ref={canvasRef} />
+          {showToolPanels && settingsSearchOpen && (
+            <SettingsSearchOverlay
+              open={settingsSearchOpen}
+              query={settingsSearchQuery}
+              groupedResults={groupedSettingsSearchResults}
+              flatResults={settingsSearchResults}
+              selectedIndex={settingsSearchIndex}
+              onChangeQuery={(value) => {
+                setSettingsSearchQuery(value);
+                setSettingsSearchIndex(0);
+              }}
+              onSelectIndex={setSettingsSearchIndex}
+              onConfirm={confirmSettingsSearch}
+              onClose={closeSettingsSearch}
+            />
+          )}
 
           <div id="help-card" className={helpVisible && studioLike ? '' : 'hidden'}>
             <div className="help-row"><span className="help-ic">↻</span> Drag to orbit camera</div>

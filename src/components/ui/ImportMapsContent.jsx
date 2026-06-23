@@ -46,7 +46,7 @@ function FilePicker({ fileName, onPick }) {
   );
 }
 
-function ImportMapSection({ type, map, ctx }) {
+function ImportMapSection({ type, map, ctx, forceOpen = false }) {
   const meta = MAP_META[type];
   const settings = map?.settings ?? {
     mode: 'disabled',
@@ -64,7 +64,9 @@ function ImportMapSection({ type, map, ctx }) {
       title={meta.label}
       icon={meta.icon}
       defaultOpen={meta.defaultOpen || !!map}
+      forceOpen={forceOpen}
       statusDot={active ? 'active' : undefined}
+      settingId={`terrain.${type}Map`}
     >
       <FilePicker
         fileName={map?.fileName}
@@ -124,6 +126,7 @@ function ImportMapSection({ type, map, ctx }) {
 }
 
 export default function ImportMapsContent({ ctx }) {
+  const targetId = ctx.settingsTarget?.settingId ?? null;
   return (
     <>
       <p className="section-hint">
@@ -135,6 +138,7 @@ export default function ImportMapsContent({ ctx }) {
           type={type}
           map={ctx.importedMaps?.[type]}
           ctx={ctx}
+          forceOpen={targetId === `terrain.${type}Map`}
         />
       ))}
     </>

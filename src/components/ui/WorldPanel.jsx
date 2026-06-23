@@ -24,6 +24,7 @@ export default function WorldPanel({ params, worldMode, onParam }) {
             value={params.planetRadius}
             options={[8000, 12000, 16000, 24000, 32000].map((v) => ({ value: v, label: `${(v / 1000)}k` }))}
             onChange={(v) => onParam('planetRadius', parseFloat(v))}
+            settingId="world.planetRadius"
             info="Base sphere radius in world units. Terrain rises above it; bigger = gentler curvature."
             icon={(
               <svg viewBox="0 0 16 16" fill="none">
@@ -37,6 +38,7 @@ export default function WorldPanel({ params, worldMode, onParam }) {
             value={params.planetFaceGrid}
             options={[6, 8, 10, 12].map((v) => ({ value: v, label: `${v} × ${v} / face` }))}
             onChange={(v) => onParam('planetFaceGrid', parseFloat(v))}
+            settingId="world.planetFaceGrid"
             info="Chunks per cube-face side — the spherical equivalent of chunk count (more = finer LOD streaming, more draw calls)."
             icon={(
               <svg viewBox="0 0 16 16" fill="none">
@@ -53,6 +55,7 @@ export default function WorldPanel({ params, worldMode, onParam }) {
             value={params.chunkCount}
             options={[8, 12, 16, 20, 24].map((v) => ({ value: v, label: `${v} × ${v}` }))}
             onChange={(v) => onParam('chunkCount', parseFloat(v))}
+            settingId="world.chunkCount"
             info="Dimensions of the grid of chunks around the camera (e.g. 16x16)"
             icon={(
               <svg viewBox="0 0 16 16" fill="none">
@@ -66,6 +69,7 @@ export default function WorldPanel({ params, worldMode, onParam }) {
             value={params.chunkSize}
             options={[64, 128, 192, 256].map((v) => ({ value: v, label: String(v) }))}
             onChange={(v) => onParam('chunkSize', parseFloat(v))}
+            settingId="world.chunkSize"
             info="Number of vertices per side of each grid patch (higher = more detailed)"
             icon={(
               <svg viewBox="0 0 16 16" fill="none">
@@ -77,6 +81,7 @@ export default function WorldPanel({ params, worldMode, onParam }) {
             label="Chunk Grid"
             value={params.chunkGrid}
             onChange={(v) => onParam('chunkGrid', v)}
+            settingId="world.chunkGrid"
             info="Render borders around individual chunk boundaries"
             icon={(
               <svg viewBox="0 0 16 16" fill="none">

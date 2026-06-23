@@ -108,6 +108,10 @@ function TerrainPanel({ ctx }) {
   const [tab, setTab] = useState('shape');
   const { params, onParam, worldMode } = ctx;
   const isStudio = worldMode === 'studio';
+  useEffect(() => {
+    const targetTab = ctx.settingsTarget?.tabId;
+    if (targetTab && targetTab !== tab) setTab(targetTab);
+  }, [ctx.settingsTarget?.tabId, tab]);
   const tabs = [
     { id: 'shape', label: 'Shape' },
     { id: 'noise', label: 'Noise' },
@@ -125,7 +129,7 @@ function TerrainPanel({ ctx }) {
             onChange={ctx.onPreset} info="Global terrain layout preset." />
           <SeedRow seed={params.seed} onParam={onParam} onRandomizeSeed={ctx.onRandomizeSeed} />
           {TERRAIN_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} />
+            <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} settingId={`terrain.${def.key}`} />
           ))}
         </>
       )}
@@ -135,14 +139,14 @@ function TerrainPanel({ ctx }) {
             options={Object.entries(NOISE_PRESETS).map(([key, p]) => ({ value: key, label: p.label }))}
             onChange={ctx.planetStyleProps.onNoisePreset} info="Baseline noise shape configuration." />
           {NOISE_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} />
+            <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} settingId={`terrain.${def.key}`} />
           ))}
         </>
       )}
       {tab === 'surface' && (
         <>
           {RENDER_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} />
+            <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} settingId={`terrain.${def.key}`} />
           ))}
         </>
       )}
@@ -167,12 +171,12 @@ function PlanetPanel({ ctx }) {
       {isPlanet && (
         <>
           <WorldPanelInner params={ctx.params} worldMode="planet" onParam={ctx.onParam} />
-          <PlanetStylePanel {...ctx.planetStyleProps} embedded />
+          <PlanetStylePanel {...ctx.planetStyleProps} settingsTarget={ctx.settingsTarget} embedded />
           <PlanetSummaryCard params={ctx.params} />
         </>
       )}
       {!isPlanet && (
-        <PlanetStylePanel {...ctx.planetStyleProps} embedded paletteOnly />
+        <PlanetStylePanel {...ctx.planetStyleProps} settingsTarget={ctx.settingsTarget} embedded paletteOnly />
       )}
     </SidePanel>
   );
@@ -181,11 +185,12 @@ function PlanetPanel({ ctx }) {
 function BiomesPanel({ ctx }) {
   const { params, onParam } = ctx;
   return (
-    <SidePanel title="Biomes" description="Climate distribution and masks." onClose={ctx.onClose}>
+      <SidePanel title="Biomes" description="Climate distribution and masks." onClose={ctx.onClose}>
       {BIOME_SLIDERS.map((def) => (
-        <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} />
+        <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} settingId={`biomes.${def.key}`} />
       ))}
       <ToggleRow label="Biome Debug" value={params.biomeDebug} onChange={(v) => onParam('biomeDebug', v)}
+        settingId="biomes.biomeDebug"
         info="Color-code biomes directly on the terrain surface for inspection." />
     </SidePanel>
   );
@@ -195,8 +200,9 @@ function WaterPanel({ ctx }) {
   const { params, onParam } = ctx;
   const palette = params.planetStyle?.palette ?? {};
   return (
-    <SidePanel title="Water" description="Ocean surface and colours." onClose={ctx.onClose}>
+      <SidePanel title="Water" description="Ocean surface and colours." onClose={ctx.onClose}>
       <ToggleRow label="Water Animation" value={params.waterAnim} onChange={(v) => onParam('waterAnim', v)}
+        settingId="water.waterAnim"
         info="Enable dynamic vertex displacement waves on the water surface." />
       <div className="subsection-label">Water Colors</div>
       {WATER_COLORS.map(({ key, label, icon, info }) => (
@@ -264,9 +270,9 @@ function CloudsPanel({ ctx }) {
 // Shared time-of-day control. `timeOfDay` is a single engine-owned value used
 // by the Skybox tab here, the Lighting system and the infinite HUD — never
 // duplicated. Owned (surfaced) by the Skybox tab.
-function TimeOfDayControl({ timeOfDay, onTimeOfDay }) {
+function TimeOfDayControl({ timeOfDay, onTimeOfDay, settingId }) {
   return (
-    <div className="ctl">
+    <div className="ctl" data-setting-id={settingId}>
       <div className="ctl-top">
         <span className="setting-label">Time</span>
         <span className="ctl-val" style={{ pointerEvents: 'none' }}>{formatTimeOfDay(timeOfDay)}</span>
@@ -292,12 +298,13 @@ function SkyboxPanel({ ctx }) {
   return (
     <SidePanel title="Skybox" description="Sky environment, time of day and atmosphere." onClose={ctx.onClose}>
       <ToggleRow label="Procedural Sky" value={enabled} onChange={(v) => onParam('skyboxEnabled', v)}
+        settingId="skybox.skyboxEnabled"
         info="Surround the scene with the procedural sky dome (Tile + Infinite World). When off, a flat backdrop and the manual Lighting sun angles are used." />
 
       <div className="panel-group">
         <div className="panel-group-header"><span className="panel-group-title">TIME OF DAY</span></div>
         <div className="panel-group-body">
-          <TimeOfDayControl timeOfDay={ctx.timeOfDay} onTimeOfDay={ctx.onTimeOfDay} />
+          <TimeOfDayControl timeOfDay={ctx.timeOfDay} onTimeOfDay={ctx.onTimeOfDay} settingId="skybox.timeOfDay" />
           <p className="section-hint">Drives the sky colours, sun position and atmosphere. Shared across the Tile view and the Infinite World.</p>
         </div>
       </div>
@@ -306,11 +313,12 @@ function SkyboxPanel({ ctx }) {
         <>
           <div className="subsection-label">Appearance</div>
           <SliderCtl def={SKYBOX_SLIDERS.skyboxBrightness} value={params.skyboxBrightness ?? 1}
-            onChange={(v) => onParam('skyboxBrightness', v)} />
+            onChange={(v) => onParam('skyboxBrightness', v)} settingId="skybox.skyboxBrightness" />
           <SliderCtl def={SKYBOX_SLIDERS.skyboxHaze} value={params.skyboxHaze ?? 0.55}
-            onChange={(v) => onParam('skyboxHaze', v)} />
+            onChange={(v) => onParam('skyboxHaze', v)} settingId="skybox.skyboxHaze" />
           <ToggleRow label="Night Stars" value={params.skyboxStars !== false}
             onChange={(v) => onParam('skyboxStars', v)}
+            settingId="skybox.skyboxStars"
             info="Show the procedural star field when the sun is below the horizon." />
         </>
       )}
@@ -337,7 +345,9 @@ function PerformancePanel({ ctx }) {
     <SidePanel title="Performance" description="Quality, LOD and budgets." onClose={ctx.onClose}>
       <PerformanceStats stats={ctx.stats} gpu={ctx.gpu} />
       <PerfSettings perf={ctx.perf} onPerfPreset={ctx.onPerfPreset}
-        onPerfSetting={ctx.onPerfSetting} onPerfReset={ctx.onPerfReset} />
+        onPerfSetting={ctx.onPerfSetting} onPerfReset={ctx.onPerfReset}
+        settingsTarget={ctx.settingsTarget}
+        onSettingsTargetHandled={ctx.onSettingsTargetHandled} />
     </SidePanel>
   );
 }
@@ -497,6 +507,7 @@ function EngineDebugOptions({ ctx }) {
           value={params.autoUpdate}
           onChange={(v) => onParam('autoUpdate', v)}
           info="Rebuild the terrain live as shape settings change. When off, edits are deferred until you press Regenerate."
+          settingId="debug.autoUpdate"
         />
       </CollapsibleGroup>
 
@@ -512,18 +523,21 @@ function EngineDebugOptions({ ctx }) {
               value={!!flags.freezeCulling}
               onChange={(v) => setFlag('freezeCulling', v)}
               info="Stop recomputing chunk visibility. Freeze, then orbit out to inspect the culling frustum from outside."
+              settingId="debug.freezeCulling"
             />
             <ToggleRow
               label="Freeze LOD"
               value={!!flags.freezeLod}
               onChange={(v) => setFlag('freezeLod', v)}
               info="Stop recomputing per-chunk level of detail — hold the current LOD layout while you move."
+              settingId="debug.freezeLod"
             />
             <ToggleRow
               label="Force Render"
               value={!!flags.forceRender}
               onChange={(v) => setFlag('forceRender', v)}
               info="Bypass on-demand rendering and draw every frame (use to read true sustained FPS)."
+              settingId="debug.forceRender"
             />
             <ToggleRow
               label="Disable Height Bake"
@@ -532,6 +546,7 @@ function EngineDebugOptions({ ctx }) {
               info={isStudio
                 ? 'Force the live per-pixel height field instead of the baked texture — A/B the studio render optimization.'
                 : 'Force the live per-pixel height field instead of the baked cubemap — A/B the planet render optimization.'}
+              settingId="debug.disableHeightBake"
             />
           </>
         ) : (

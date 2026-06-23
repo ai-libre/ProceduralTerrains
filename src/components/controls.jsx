@@ -5,7 +5,7 @@ export function fmt(def, v) {
   return Number(v).toFixed(digits) + (def.unit ? ` ${def.unit}` : '');
 }
 
-export function SliderCtl({ def, value, onChange, icon, info, disabled, disabledTooltip }) {
+export function SliderCtl({ def, value, onChange, icon, info, disabled, disabledTooltip, settingId }) {
   const [text, setText] = useState(fmt(def, value));
   useEffect(() => { setText(fmt(def, value)); }, [value, def]);
 
@@ -20,7 +20,11 @@ export function SliderCtl({ def, value, onChange, icon, info, disabled, disabled
   const itemIcon = icon ?? def.icon;
 
   return (
-    <div className={`ctl${disabled ? ' disabled' : ''}`} style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}>
+    <div
+      className={`ctl${disabled ? ' disabled' : ''}`}
+      data-setting-id={settingId}
+      style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}
+    >
       <div className="ctl-top">
         <div className="label-with-icon" data-tooltip={disabled ? disabledTooltip : tooltipText}>
           {itemIcon && <span className="setting-icon">{itemIcon}</span>}
@@ -60,9 +64,13 @@ export function SliderCtl({ def, value, onChange, icon, info, disabled, disabled
   );
 }
 
-export function ToggleRow({ label, value, onChange, icon, info, disabled, disabledTooltip }) {
+export function ToggleRow({ label, value, onChange, icon, info, disabled, disabledTooltip, settingId }) {
   return (
-    <div className={`toggle-row${disabled ? ' disabled' : ''}`} style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}>
+    <div
+      className={`toggle-row${disabled ? ' disabled' : ''}`}
+      data-setting-id={settingId}
+      style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}
+    >
       <div className="label-with-icon" data-tooltip={disabled ? disabledTooltip : info}>
         {icon && <span className="setting-icon">{icon}</span>}
         <span className="setting-label">{label}</span>
@@ -85,9 +93,13 @@ export function ToggleRow({ label, value, onChange, icon, info, disabled, disabl
   );
 }
 
-export function SelectRow({ label, value, options, format, onChange, icon, info, disabled, disabledTooltip }) {
+export function SelectRow({ label, value, options, format, onChange, icon, info, disabled, disabledTooltip, settingId }) {
   return (
-    <div className={`row${disabled ? ' disabled' : ''}`} style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}>
+    <div
+      className={`row${disabled ? ' disabled' : ''}`}
+      data-setting-id={settingId}
+      style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}
+    >
       <div className="label-with-icon" data-tooltip={disabled ? disabledTooltip : info}>
         {icon && <span className="setting-icon">{icon}</span>}
         <span className="setting-label">{label}</span>

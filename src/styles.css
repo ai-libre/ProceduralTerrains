@@ -1353,6 +1353,13 @@ input[type="color"].palette-color-input {
   font-family: var(--font);
   font-size: 13px;
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.settings-search-input::-webkit-search-cancel-button,
+.settings-search-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
 }
 .settings-search-input::placeholder { color: var(--text-dim); }
 .settings-search-clear {

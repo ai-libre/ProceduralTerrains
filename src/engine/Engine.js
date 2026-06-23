@@ -601,7 +601,6 @@ export class Engine {
 
   randomizeSeed() {
     this.setParam('seed', (Math.random() * 0xffffffff) >>> 0);
-    this.cb.onToast(`Seed → ${this.params.seed}`);
   }
 
   newProject() {

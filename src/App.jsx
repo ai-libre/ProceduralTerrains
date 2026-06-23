@@ -369,6 +369,9 @@ export default function App() {
       case 'world.planetFaceGrid': return `${params.planetFaceGrid} / face`;
 
       case 'water.waterAnim': return yesNo(params.waterAnim);
+      case 'water.waterMode': return params.waterMode ?? 'legacy';
+      case 'water.waterEnabled': return yesNo(params.waterEnabled !== false && params.waterMode !== 'off');
+      case 'water.seaLevel': return num(params.seaLevel, 0, ' m');
 
       case 'planet.water.deep': return hex(palette.deep);
       case 'planet.water.shallow': return hex(palette.shallow);
@@ -596,6 +599,9 @@ export default function App() {
     onPerfPreset: (key) => engine().setPerfPreset(key),
     onPerfSetting: (key, value) => engine().setPerfSetting(key, value),
     onCloudQuality: (key) => engine().setCloudQuality(key),
+    onApplyWaterPreset: (key) => engine().applyWaterPreset(key),
+    onResetWaterSettings: () => engine().resetWaterSettings(),
+    onExportWaterMasks: (opts) => engine().exportWaterMasks(opts),
     onPerfReset: () => engine().resetPerfSettings(),
     timeOfDay, onTimeOfDay: handleTimeOfDay,
     onExport, onExportScreenshot, onExportHeightmap,

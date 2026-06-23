@@ -5,6 +5,7 @@
 
 import { CLOUD_DEFAULT_PARAMS } from './sky/CloudSettings.js';
 import { SKYBOX_DEFAULT_PARAMS } from './sky/SkyboxSettings.js';
+import { WATER_DEFAULT_PARAMS } from './water/WaterSettings.js';
 
 export const DEFAULT_PARAMS = {
   seed: 1337,
@@ -77,6 +78,9 @@ export const DEFAULT_PARAMS = {
   // procedural sky dome — shared by studio (Tile) + infinite world. Serializes
   // with every save; old saves without these keys fall back to the defaults.
   ...SKYBOX_DEFAULT_PARAMS,
+
+  // scalable water pipeline — old saves without waterMode migrate to legacy.
+  ...WATER_DEFAULT_PARAMS,
 };
 
 export const PRESETS = {

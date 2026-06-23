@@ -602,6 +602,31 @@ body {
   line-height: 1.5;
   padding: 4px 0;
 }
+.section-hint.warning { color: var(--warning, #e8a84a); }
+
+.water-mode-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--panel-elevated, rgba(255, 255, 255, 0.03));
+}
+.water-mode-banner.legacy { border-color: rgba(100, 160, 220, 0.35); }
+.water-mode-banner.realistic { border-color: rgba(60, 200, 180, 0.4); }
+.water-mode-banner-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.water-mode-banner-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
 
 /* ============ VIEWPORT ============ */
 #main { position: relative; flex: 1; overflow: hidden; min-height: 0; }

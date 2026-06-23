@@ -6,15 +6,15 @@ import { PANEL_ICONS } from '../icons/panelIcons.jsx';
 import ImportMapsContent from '../ui/ImportMapsContent.jsx';
 import CollapsibleGroup from '../ui/CollapsibleGroup.jsx';
 import TileMapDebugSection from '../ui/TileMapDebugSection.jsx';
-import { TERRAIN_SLIDERS, NOISE_SLIDERS, BIOME_SLIDERS, RENDER_SLIDERS, WATER_COLORS, ColorField, InfoDot } from './defs.jsx';
+import { TERRAIN_SLIDERS, NOISE_SLIDERS, BIOME_SLIDERS, RENDER_SLIDERS, InfoDot } from './defs.jsx';
 import { PRESETS } from '../../engine/presets.js';
 import { NOISE_PRESETS } from '../../engine/style/NoisePresets.js';
-import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
 import { formatTimeOfDay } from '../../engine/sky/TimeOfDay.js';
 import { APP_VERSION } from '../../constants/app.js';
 import PlanetStylePanel from '../PlanetStylePanel.jsx';
 import WorldPanelInner from '../ui/WorldPanel.jsx';
 import CloudPanelInner from '../ui/CloudPanel.jsx';
+import WaterPanelInner from '../ui/WaterPanel.jsx';
 import EnvironmentPanelInner from '../ui/EnvironmentPanel.jsx';
 import PerformanceStats from '../ui/PerformancePanel.jsx';
 import PlanetSummaryCard from '../ui/PlanetSummaryCard.jsx';
@@ -38,7 +38,7 @@ export const PANEL_META = {
     modes: ['planet', 'studio'],
   },
   biomes: { label: 'Biomes', title: 'Biomes', desc: 'Climate distribution and masks.', icon: PANEL_ICONS.biomes },
-  water: { label: 'Water', title: 'Water', desc: 'Ocean surface and colours.', icon: PANEL_ICONS.water },
+  water: { label: 'Water', title: 'Water', desc: 'Ocean surface, quality modes and volumetric settings.', icon: PANEL_ICONS.water },
   props: { label: 'Props', title: 'Props', desc: 'Procedural grass and flowers.', icon: PANEL_ICONS.props },
   clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: PANEL_ICONS.clouds },
   skybox: { label: 'Skybox', title: 'Skybox', desc: 'Sky environment, time of day and atmosphere.', icon: PANEL_ICONS.skybox },
@@ -197,19 +197,19 @@ function BiomesPanel({ ctx }) {
 }
 
 function WaterPanel({ ctx }) {
-  const { params, onParam } = ctx;
-  const palette = params.planetStyle?.palette ?? {};
   return (
-      <SidePanel title="Water" description="Ocean surface and colours." onClose={ctx.onClose}>
-      <ToggleRow label="Water Animation" value={params.waterAnim} onChange={(v) => onParam('waterAnim', v)}
-        settingId="water.waterAnim"
-        info="Enable dynamic vertex displacement waves on the water surface." />
-      <div className="subsection-label">Water Colors</div>
-      {WATER_COLORS.map(({ key, label, icon, info }) => (
-        <ColorField key={key} label={label} icon={icon} info={info}
-          value={colorToHex(palette[key] ?? [0.05, 0.2, 0.35])}
-          onChange={(e) => ctx.planetStyleProps.onColorChange(key, parseColor(e.target.value))} />
-      ))}
+    <SidePanel title="Water" description="Ocean surface, quality modes and volumetric settings." onClose={ctx.onClose}>
+      <WaterPanelInner
+        params={ctx.params}
+        onParam={ctx.onParam}
+        worldMode={ctx.worldMode}
+        perf={ctx.perf}
+        onPerfSetting={ctx.onPerfSetting}
+        planetStyleProps={ctx.planetStyleProps}
+        onApplyWaterPreset={ctx.onApplyWaterPreset}
+        onResetWaterSettings={ctx.onResetWaterSettings}
+        onExportWaterMasks={ctx.onExportWaterMasks}
+      />
     </SidePanel>
   );
 }
@@ -582,6 +582,8 @@ function ExportPanel({ ctx }) {
     bakeColor: true, texRes: '2048', bakeLighting: false, bakeNormal: true,
     exportHeightmap: false, exportSplat: false, exportCollision: false, collisionRes: '128',
     exportWater: false, exportPreset: true,
+    exportWaterMask: false, exportDepthMap: false, exportShorelineMask: false, exportFoamMask: false,
+    excludeWaterFromExport: false, exportWaterMetadata: false,
   });
   const [busy, setBusy] = useState(false);
   const set = (k, v) => setOpt((p) => ({ ...p, [k]: v }));
@@ -639,6 +641,15 @@ function ExportPanel({ ctx }) {
         <SelectRow label="Collision Resolution" value={opt.collisionRes} options={COLL_OPTIONS} onChange={(v) => set('collisionRes', v)} />
       )}
       <ToggleRow label="Include Water Plane" value={opt.exportWater} onChange={(v) => set('exportWater', v)} />
+      {opt.exportWater && (
+        <ToggleRow label="Exclude Water from Export" value={opt.excludeWaterFromExport} onChange={(v) => set('excludeWaterFromExport', v)} />
+      )}
+      <div className="subsection-label">Water Maps</div>
+      <ToggleRow label="Export Water Mask" value={opt.exportWaterMask} onChange={(v) => set('exportWaterMask', v)} />
+      <ToggleRow label="Export Depth Map" value={opt.exportDepthMap} onChange={(v) => set('exportDepthMap', v)} />
+      <ToggleRow label="Export Shoreline Mask" value={opt.exportShorelineMask} onChange={(v) => set('exportShorelineMask', v)} />
+      <ToggleRow label="Export Foam Mask" value={opt.exportFoamMask} onChange={(v) => set('exportFoamMask', v)} />
+      <ToggleRow label="Include Water Material Metadata" value={opt.exportWaterMetadata} onChange={(v) => set('exportWaterMetadata', v)} />
       <ToggleRow label="Export Preset (JSON)" value={opt.exportPreset} onChange={(v) => set('exportPreset', v)} />
     </SidePanel>
   );

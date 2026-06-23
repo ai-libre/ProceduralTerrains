@@ -472,8 +472,8 @@ export class TerrainExporter {
       }
     }
 
-    // F. Add Water Mesh
-    if (exportWater && seaLevel > 0.5) {
+    // F. Add Water Mesh (separate named object for scene export)
+    if (exportWater && !options.excludeWaterFromExport && seaLevel > 0.5) {
       onToast('Adding water plane...');
       const waterGeo = new THREE.PlaneGeometry(boardSize, boardSize);
       waterGeo.rotateX(-Math.PI / 2);
@@ -486,7 +486,7 @@ export class TerrainExporter {
         opacity: 0.6
       });
       const waterMesh = new THREE.Mesh(waterGeo, waterMat);
-      waterMesh.name = 'Water_Plane';
+      waterMesh.name = 'Water';
       waterMesh.position.y = seaLevel;
       exportGroup.add(waterMesh);
     }

@@ -40,6 +40,8 @@ import { generateStackGLSL, packStackUniforms } from './terrain/noise/noiseStack
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 import { PaintModeManager } from '../paint/PaintModeManager.js';
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
+import { WaterSystem } from './water/WaterSystem.js';
+import { migrateWaterParams } from './water/WaterSettings.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const DEFAULT_IMPORT_SETTINGS = { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
@@ -87,7 +89,7 @@ export class Engine {
   constructor({ canvas, minimapBase, minimapOverlay, callbacks, initialParams }) {
     this.canvas = canvas;
     this.cb = callbacks;
-    this.params = { ...DEFAULT_PARAMS, ...initialParams };
+    this.params = migrateWaterParams({ ...DEFAULT_PARAMS, ...initialParams });
     // Live Noise Stack (drives terrain shape). Migrated from params so old saves
     // get the default single Classic-Terrain layer == bit-identical to before.
     this.noiseStack = migrateStack(this.params.noiseStack);
@@ -290,6 +292,9 @@ export class Engine {
     this.water.renderOrder = 10;
     this.water.frustumCulled = false;
     this.scene.add(this.water);
+
+    this.waterSystem = new WaterSystem(this);
+    this.waterSystem.init();
 
     // clean diorama base: perimeter walls + flat bottom (no z-fight with chunk skirts)
     this.plinth = new THREE.Mesh(
@@ -848,7 +853,10 @@ export class Engine {
       rebuildTerrainShaderSource(this.terrainMaterial, sg);
       rebuildWaterShaderSource(this.waterMaterial, sg);
       if (this._infiniteTerrainMat) rebuildTerrainShaderSource(this._infiniteTerrainMat, sg);
-      if (this._infiniteWaterMat) rebuildWaterShaderSource(this._infiniteWaterMat, sg);
+      if (this._infiniteWaterMat && !this.waterSystem?.ownsMaterial(this._infiniteWaterMat)) {
+        rebuildWaterShaderSource(this._infiniteWaterMat, sg);
+      }
+      this.waterSystem?.onStackRebuilt(sg, oct);
       if (this.heightSampler) this.heightSampler.invalidate();
       this._applyUniforms();
       if (!this._compiling) this.cb.onStatus('Ready', false);
@@ -998,11 +1006,7 @@ export class Engine {
     this._updatePlanetWater();
     this.waterMaterial.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
     this.water.position.y = p.seaLevel;
-    // The flat studio water plane belongs to studio mode only. _applyUniforms
-    // also runs while rebuilding the planet/infinite world (e.g. on resize), so
-    // gate visibility by mode — otherwise resizing a planet re-shows the studio
-    // water slab inside the globe.
-    this.water.visible = this.worldMode === 'studio' && p.seaLevel > 0.5;
+    if (this.waterSystem) this.waterSystem.sync(p, this.worldMode);
 
     this.board.updateBounds(this._maxHeight(), this._skirtDepth());
     this._updatePlinth();
@@ -1311,6 +1315,7 @@ export class Engine {
   }
 
   _waterLevel() {
+    if (!this.waterSystem?.isEnabled()) return null;
     return this.params.seaLevel > 0.5 ? this.params.seaLevel : null;
   }
 
@@ -1475,7 +1480,7 @@ export class Engine {
     const oct = Math.round(p.octaves);
     this._infiniteTerrainMat = createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL);
     this._infiniteTerrainMat.wireframe = p.wireframe;
-    this._infiniteWaterMat = createInfiniteWaterMaterial(this.uniforms, oct, this._stackGLSL);
+    this._infiniteWaterMat = this.waterSystem.createInfiniteMaterial();
     this._infiniteWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
 
     // Store the tile frequency for infinite mode
@@ -1528,6 +1533,8 @@ export class Engine {
     // Apply render scale + water quality uniforms to the fresh materials
     this._applyPixelRatio();
     this._applyWaterPerf();
+
+    this.waterSystem.sync(p, 'infinite');
 
     // Compile the INFINITE_MODE shader variants in the background before the
     // first infinite frame renders (avoids a multi-second freeze on entry).
@@ -1582,17 +1589,17 @@ export class Engine {
       this._infiniteTerrainMat.dispose();
       this._infiniteTerrainMat = null;
     }
-    if (this._infiniteWaterMat) {
+    if (this._infiniteWaterMat && !this.waterSystem?.ownsMaterial(this._infiniteWaterMat)) {
       this._infiniteWaterMat.dispose();
-      this._infiniteWaterMat = null;
     }
+    this._infiniteWaterMat = null;
   }
 
   /** Restore the single-board studio scene + editor camera. */
   _enterStudioMode() {
     this.board.group.visible = true;
     this.plinth.visible = true;
-    this.water.visible = this.params.seaLevel > 0.5;
+    this.water.visible = this.waterSystem?.isEnabled() && this.params.seaLevel > 0.5;
     if (this.studioCloud) {
       this.studioCloud.setInScene(true);
       this._applyCloudSettings();
@@ -2080,9 +2087,10 @@ export class Engine {
 
   /** Water quality uniforms — per water material, never shared with terrain. */
   _applyWaterPerf() {
+    this.waterSystem?.applyPerf(this.perf);
     const s = this.perf;
     for (const mat of [this.waterMaterial, this._infiniteWaterMat, this.planetWaterMat]) {
-      if (!mat) continue;
+      if (!mat || this.waterSystem?.ownsMaterial(mat)) continue;
       mat.uniforms.uWaterQuality.value = s.waterQuality;
       mat.uniforms.uWaterDetail.value = s.waterDetail;
       mat.uniforms.uWaterReflection.value = s.waterReflection;
@@ -2234,6 +2242,15 @@ export class Engine {
     for (const key of Object.keys(DEFAULT_PARAMS)) {
       if (key in src && typeof src[key] === typeof DEFAULT_PARAMS[key]) next[key] = src[key];
     }
+    if (!('waterMode' in src)) {
+      if (next.seaLevel <= 0.5) {
+        next.waterMode = 'off';
+        next.waterEnabled = false;
+      } else {
+        next.waterMode = 'legacy';
+        next.waterEnabled = true;
+      }
+    }
     this.params = next;
     this._migrateLegacyCloudPerf(src);
     if (src.planetStyle) this.planetStyle.importJSON({ planetStyle: src.planetStyle });
@@ -2269,6 +2286,26 @@ export class Engine {
     this.qualityPreset = this.perf.preset;
     this._applyPerformance();
     this._notifyPerf();
+  }
+
+  applyWaterPreset(presetKey) {
+    this.params = this.waterSystem.applyPreset(presetKey);
+    this.cb.onParams({ ...this.params });
+    this._afterParamChange(false);
+    this.cb.onToast(`Water preset: ${presetKey}`);
+  }
+
+  resetWaterSettings() {
+    this.params = this.waterSystem.resetSettings();
+    this.cb.onParams({ ...this.params });
+    this._afterParamChange(false);
+    this.cb.onToast('Water settings reset');
+  }
+
+  exportWaterMasks(options) {
+    const files = this.waterSystem.exportMasks(options);
+    if (files.length) this.cb.onToast(`Exported: ${files.join(', ')}`);
+    else this.cb.onToast('No water masks exported');
   }
 
   // --------------------------------------------------------------- exports
@@ -2338,6 +2375,9 @@ export class Engine {
     this.cb.onStatus('Preparing export...', true);
     const onMsg = (msg) => { this.cb.onStatus(msg, true); this.cb.onToast(msg); };
     try {
+      if (options.exportWaterMask || options.exportDepthMap || options.exportShorelineMask || options.exportFoamMask) {
+        this.exportWaterMasks({ ...options, maskRes: options.maskRes ?? options.meshRes ?? '512' });
+      }
       if (this.worldMode === 'planet') {
         // export the full cube-sphere planet mesh
         await PlanetExporter.export(this.renderer, this.params, this.uniforms, options, onMsg);
@@ -2415,11 +2455,13 @@ export class Engine {
     // surface); inactive when there is no water — works in studio + infinite.
     // Planet has its own ocean shell and a curved "up", so the screen-space
     // underwater pass does not apply there (waterLevel stays null → inactive).
-    const waterLevel = (this.worldMode !== 'planet' && this.params.seaLevel > 0.5)
+    const waterLevel = (this.worldMode !== 'planet' && this.waterSystem?.isEnabled())
       ? this.params.seaLevel : null;
     this.underwater.update(
       dt, this.uniforms.uTime.value, this.camera.position.y, waterLevel, this.uniforms
     );
+
+    this.waterSystem?.update(this._fps);
 
     this.paintMode?.update(dt);
     this.propsManager?.update({
@@ -2683,6 +2725,7 @@ export class Engine {
     this.board.dispose();
     this.minimap.dispose();
     this.underwater.dispose();
+    this.waterSystem?.dispose();
     for (const t of this._matTrash) for (const m of t.mats) m.dispose();
     this._matTrash = [];
     this._warmGeo.dispose();

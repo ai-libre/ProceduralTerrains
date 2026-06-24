@@ -63,6 +63,31 @@ mirrors the engine's parameter state and renders the panels.
 - Screenshot (PNG) of the current viewport
 - Heightmap (PNG, 1024², grayscale) rendered orthographically from the same shader
 
+## Hex Tiles (H3)
+
+A toggleable **discrete hex-tile** mode ("board-game" terrain) built on Uber's
+**[H3](https://h3geo.org/)** geospatial grid (`h3-js`). Each H3 cell becomes a
+flat-topped hexagonal column whose **height + biome color come from the Noise
+Stack**, sampled at the cell center by the same f32-exact CPU samplers the
+physics use — so tiles match the smooth terrain. Works in all three modes:
+
+| Mode | H3 source | Mapping |
+|---|---|---|
+| **Planet** | every cell on the globe (`getRes0Cells`→children) | cells stay on the sphere; flat tops via the tangent plane |
+| **Tile** | an equatorial lat/lng patch (`polygonToCells`) | equirectangular projection onto the board's XZ |
+| **Infinite** | a disk around the camera (`gridDisk`) | fixed geo↔world scale; rebuilt when the camera crosses a cell |
+
+Toggle it in the **Planet panel → Hex Tiles (H3)** (also shown in Tile / Infinite
+modes), with a resolution selector. The whole tile field is one merged,
+flat-shaded mesh (sun-baked vertex colors → no extra lights, one draw call).
+Higher resolutions add a one-time build cost (default res rebuilds in ~0.1s; the
+"heavy" options can take a few hundred ms) but never cost anything per frame — a
+signature guard rebuilds only when the terrain or settings actually change.
+
+Offline tooling (no WebGL needed): `node tools/h3harness.mjs` rasterizes the
+three modes to `.claude/shots/h3-*.png`, and `node tools/h3verify.mjs` validates
+geometry + reports build timings.
+
 ## Performance notes
 
 Normals are finite-differenced per fragment (3 height evaluations per pixel), which is

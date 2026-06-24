@@ -34,7 +34,22 @@ github.com). The npm registry is allowlisted, so we depend on the official
 - [x] Phase 2  — **Tile (flat board)** hex tiles (planar H3 patch → board XZ).
 - [x] Phase 3  — **Infinite World** hex tiles (camera-following H3 disk patch, rebuilt on center-cell change).
 - [x] Phase 4  — Biome coloring from the real climate classifier + water, beach band + snow caps. Verified: board now shows distinct desert/canyon/forest/water; planet shows the full biome range instead of washing to sand.
-- [ ] Phase 5  — Perf (LOD by H3 resolution / distance), verification, README/docs.
+- [x] Phase 5  — Verification harness (`tools/h3verify.mjs`), perf timing, README docs.
+
+## Verification & perf (tools/h3verify.mjs — all checks pass)
+Geometry validity (finite positions, colors in range, watertight tri counts),
+cell counts, and the signature-guard (identical inputs → no rebuild) all pass.
+Build time / triangles (one merged mesh = one draw call), single-threaded JS:
+
+| Mode | res 0 | res 1 (default) | res 2 (heavy) |
+|---|---|---|---|
+| Planet | 122 cells · ~42ms · 2.2k tris | 842 · ~98ms · 16k | 5,882 · ~408ms · 106k |
+| Board  | 336 · ~56ms · 6.2k | 2,312 · ~145ms · 42k | 16,186 · ~743ms · 293k |
+| Infinite | 331 · ~29ms · 6k | 631 · ~25ms · 11k | 1,027 · ~45ms · 18k |
+
+Builds are one-time (signature-guarded), not per-frame; res 2 is flagged "heavy"
+in the UI. Possible future work: off-thread build for the heavy resolutions,
+distance-based LOD between H3 resolutions, and a loading overlay on toggle.
 
 ## Objective feedback loop
 `tools/h3harness.mjs` drives the REAL engine modules (f32-exact CPU samplers +

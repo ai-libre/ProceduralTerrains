@@ -1,0 +1,26 @@
+name: CI
+
+# Build + H3 verification check for pull requests (no deploy). main is built by
+# the Pages deploy workflow, so we only need this on PRs / other branches.
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: H3 hex-tile verification
+        run: node tools/h3verify.mjs

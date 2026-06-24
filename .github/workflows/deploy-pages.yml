@@ -26,16 +26,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run build
-      # enablement: true turns Pages on with "GitHub Actions" as the source via
-      # the API, so no manual Settings step is needed (requires the workflow to
-      # have admin/pages permission; if it fails, enable Pages manually once).
+      # Requires Pages to be enabled once with "GitHub Actions" as the source
+      # (Settings → Pages). The workflow token can't create the Pages site
+      # itself ("Resource not accessible by integration"), so we don't try to.
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

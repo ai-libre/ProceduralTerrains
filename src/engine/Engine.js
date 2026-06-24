@@ -2009,7 +2009,8 @@ export class Engine {
    * (Phase 1: planet only; board / infinite added in later phases.)
    */
   _syncHexTiles() {
-    const supported = this.worldMode === 'planet' || this.worldMode === 'studio';
+    const supported = this.worldMode === 'planet' || this.worldMode === 'studio'
+      || this.worldMode === 'infinite';
     const active = !!this.params.hexTiles && supported;
 
     if (!active) {
@@ -2021,11 +2022,36 @@ export class Engine {
       } else if (this.worldMode === 'studio') {
         if (this.board) this.board.group.visible = true;
         this.waterSystem?.sync(this.params, this.worldMode);
+      } else if (this.worldMode === 'infinite') {
+        if (this.infiniteWorld) {
+          this.infiniteWorld.group.visible = true;
+          this.waterSystem?.sync(this.params, this.worldMode);
+        }
       }
       return;
     }
 
     if (!this.hexTileLayer) this.hexTileLayer = new HexTileLayer(this.scene);
+
+    if (this.worldMode === 'infinite') {
+      this.hexTileLayer.buildInfinite({
+        sampler: this._getHexInfiniteSampler(),
+        cameraX: this.camera.position.x,
+        cameraZ: this.camera.position.z,
+        seaLevel: this.params.seaLevel,
+        heightScale: this.params.heightScale,
+        resolution: Math.round(this.params.hexResolution),
+        palette: this.planetStyle?.getStyle?.().palette,
+        sunAzimuth: this.params.sunAzimuth,
+        sunElevation: this.params.sunElevation,
+        terrainGen: this._terrainGen,
+      });
+      if (this.infiniteWorld) this.infiniteWorld.group.visible = false;
+      if (this.infiniteWorld?.waterPlane) this.infiniteWorld.waterPlane.visible = false;
+      this.hexTileLayer.setVisible(true);
+      this._needsRender = true;
+      return;
+    }
 
     if (this.worldMode === 'planet') {
       this.hexTileLayer.buildPlanet({
@@ -2072,6 +2098,19 @@ export class Engine {
       this._hexBoardSampler.setStack(this.noiseStack);
     }
     return this._hexBoardSampler;
+  }
+
+  /** CPU height sampler for infinite-world hex tiles (no island falloff). */
+  _getHexInfiniteSampler() {
+    if (!this._hexInfiniteSampler) {
+      this._hexInfiniteSampler = new TerrainHeightSampler(this.uniforms, () => ({
+        octaves: Math.round(this.params.octaves),
+        infinite: true,
+      }), this.noiseStack);
+    } else {
+      this._hexInfiniteSampler.setStack(this.noiseStack);
+    }
+    return this._hexInfiniteSampler;
   }
 
   async _warmupPlanetShaders(oct) {
@@ -2858,6 +2897,9 @@ export class Engine {
     if (this.infiniteWorld) {
       this.infiniteWorld.update(this.camera.position, this.camera);
     }
+
+    // keep the camera-following hex patch in sync (cheap until a new center cell)
+    if (this.params.hexTiles) this._syncHexTiles();
 
     this._maybeWarmUnderwater();
     this.underwater.render(this.renderer, this.scene, this.camera);

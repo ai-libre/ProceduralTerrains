@@ -179,10 +179,18 @@ const HEX_RES_OPTIONS_BOARD = [
   { value: 2, label: 'Fine — ~16,000 tiles (heavy)' },
 ];
 
+const HEX_RES_OPTIONS_INFINITE = [
+  { value: 0, label: 'Large tiles — ~330 around camera' },
+  { value: 1, label: 'Medium tiles — ~630 around camera' },
+  { value: 2, label: 'Small tiles — ~1,030 around camera' },
+];
+
 function HexTilesSection({ params, onParam, worldMode }) {
   const isPlanet = worldMode === 'planet';
-  const opts = isPlanet ? HEX_RES_OPTIONS_PLANET : HEX_RES_OPTIONS_BOARD;
-  const subject = isPlanet ? 'globe' : 'board';
+  const isInfinite = worldMode === 'infinite';
+  const opts = isPlanet ? HEX_RES_OPTIONS_PLANET
+    : isInfinite ? HEX_RES_OPTIONS_INFINITE : HEX_RES_OPTIONS_BOARD;
+  const subject = isPlanet ? 'globe' : isInfinite ? 'world' : 'board';
   return (
     <CollapsibleGroup title="Hex Tiles (H3)" defaultOpen={!!params.hexTiles}>
       <p className="section-hint">
@@ -223,8 +231,8 @@ function PlanetPanel({ ctx }) {
       )}
       {!isPlanet && (
         <>
-          {ctx.worldMode === 'studio' && (
-            <HexTilesSection params={ctx.params} onParam={ctx.onParam} worldMode="studio" />
+          {(ctx.worldMode === 'studio' || ctx.worldMode === 'infinite') && (
+            <HexTilesSection params={ctx.params} onParam={ctx.onParam} worldMode={ctx.worldMode} />
           )}
           <PlanetStylePanel {...ctx.planetStyleProps} settingsTarget={ctx.settingsTarget} embedded paletteOnly />
         </>

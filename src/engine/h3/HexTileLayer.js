@@ -15,8 +15,9 @@ import * as THREE from 'three';
 import { HexTileMeshBuilder, makeHexTileMaterial, sunDirection } from './HexTileMesh.js';
 import {
   planetCells, cellBoundaryDirs, cellCenterDir,
-  patchCells, latLngToXZ, cellToLatLng, cellToBoundary,
+  patchCells, diskCells, latLngToXZ, cellToLatLng, cellToBoundary,
 } from './h3util.js';
+import { latLngToCell } from 'h3-js';
 import { EARTH_PALETTE } from '../style/ColorPalette.js';
 
 const MAX_LAND_01 = 1.35; // heightAt clamps shape to [0,1.35] before scaling
@@ -29,9 +30,20 @@ const BOARD_BASE_RES = 3;   // UI res 0→3 (336 cells) .. 2→5 (16k cells)
 const BOARD_MAX_STEP = 2;
 
 function clampInt(v, lo, hi) { v = v | 0; return v < lo ? lo : v > hi ? hi : v; }
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+// Infinite world: a camera-following H3 patch. World↔geo scale is a fixed
+// constant; the UI step picks the H3 resolution + ring radius (tile size +
+// patch coverage). At unitsPerDeg=1200: res 5/6/7 → ~150/55/21 world-unit tiles.
+const INF_UNITS_PER_DEG = 1200;
+const INF_STEP = [
+  { res: 5, rings: 10 },  // ~331 tiles, ~1500u radius
+  { res: 6, rings: 14 },  // ~631 tiles, ~770u radius
+  { res: 7, rings: 18 },  // ~1027 tiles, ~378u radius
+];
 
 /** Elevation-banded linear-RGB color from the palette. */
-function colorForHeight(terrainH, seaLevel, maxLandH, pal) {
+export function colorForHeight(terrainH, seaLevel, maxLandH, pal) {
   if (terrainH <= seaLevel) {
     const d = seaLevel > 0 ? Math.min(1, (seaLevel - terrainH) / seaLevel) : 0;
     return mix(pal.shallow, pal.deep, d);
@@ -190,6 +202,66 @@ export class HexTileLayer {
     }
 
     this._swapMesh(builder);
+  }
+
+  /**
+   * Build a camera-following hex patch for the Infinite World. H3 cells in a
+   * disk around the camera's geo-projected position are mapped back to world XZ
+   * (constant scale, no island falloff); height + color from TerrainHeightSampler.
+   * Rebuilds only when the camera crosses into a new center cell.
+   *
+   * @param {object} o
+   * @param {TerrainHeightSampler} o.sampler   (env.infinite must be true)
+   * @param {number} o.cameraX  @param {number} o.cameraZ
+   * @param {number} o.seaLevel @param {number} o.heightScale
+   * @param {number} o.resolution  UI step (0..2 → H3 res 5..7)
+   * @param {object} [o.palette] @param {number} [o.sunAzimuth] @param {number} [o.sunElevation]
+   * @param {number} [o.terrainGen]
+   * @returns {boolean} whether a rebuild happened
+   */
+  buildInfinite(o) {
+    const step = INF_STEP[clampInt(o.resolution, 0, INF_STEP.length - 1)];
+    const upd = INF_UNITS_PER_DEG;
+    const centerLat = clamp(o.cameraZ / upd, -89, 89);
+    const centerLng = clamp(o.cameraX / upd, -179, 179);
+    const centerCell = latLngToCell(centerLat, centerLng, step.res);
+
+    const sig = [
+      'inf', step.res, step.rings, centerCell, Math.round(o.seaLevel),
+      Math.round(o.heightScale), o.sunAzimuth, o.sunElevation, o.terrainGen ?? 0,
+    ].join('|');
+    if (sig === this._signature && this.mesh) return false;
+    this._signature = sig;
+
+    const pal = o.palette || EARTH_PALETTE;
+    const sampler = o.sampler;
+    const seaLevel = o.seaLevel;
+    const maxLandH = MAX_LAND_01 * o.heightScale;
+    const builder = new HexTileMeshBuilder({
+      sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42),
+    });
+
+    const cells = diskCells(step.res, centerLat, centerLng, step.rings);
+    for (const h3 of cells) {
+      const [clat, clng] = cellToLatLng(h3);
+      const cx = clng * upd, cz = clat * upd;
+      const terrainH = sampler.heightAt(cx, cz);
+      const isWater = terrainH <= seaLevel;
+      const topY = isWater ? seaLevel : terrainH;
+
+      const ring = cellToBoundary(h3);
+      const top = new Array(ring.length);
+      const base = new Array(ring.length);
+      for (let i = 0; i < ring.length; i++) {
+        const x = ring[i][1] * upd, z = ring[i][0] * upd;
+        top[i] = [x, topY, z];
+        base[i] = [x, 0, z];
+      }
+      builder.addCell(top, base, colorForHeight(terrainH, seaLevel, maxLandH, pal));
+    }
+
+    this._swapMesh(builder);
+    return true;
   }
 
   _swapMesh(builder) {

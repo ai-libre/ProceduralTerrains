@@ -32,8 +32,24 @@ github.com). The npm registry is allowlisted, so we depend on the official
 - [x] Phase 0  — Understand codebase; install `h3-js`; write this goal.
 - [x] Phase 1  — Core: `h3util` + `HexTileMesh` + `HexTileLayer`; wire **Planet** mode behind a `hexTiles` toggle + `hexResolution`; UI toggle. Build green.
 - [x] Phase 2  — **Tile (flat board)** hex tiles (planar H3 patch → board XZ).
-- [ ] Phase 3  — **Infinite World** hex tiles (camera-following H3 patch, streamed).
-- [ ] Phase 4  — Biome coloring from the live palette + water (cells below sea level), sun-baked flat shading, polish.
+- [x] Phase 3  — **Infinite World** hex tiles (camera-following H3 disk patch, rebuilt on center-cell change).
+- [ ] Phase 4  — Biome coloring from the real climate classifier + water, sun-baked flat shading, polish.
 - [ ] Phase 5  — Perf (LOD by H3 resolution / distance), verification, README/docs.
+
+## Objective feedback loop
+`tools/h3harness.mjs` drives the REAL engine modules (f32-exact CPU samplers +
+real H3 helpers + production `colorForHeight`) and rasterizes board / planet /
+infinite views to `.claude/shots/h3-*.png` with per-view stats — used to SEE
+and iterate, since no WebGL/browser is available in this environment.
+Run: `node tools/h3harness.mjs`.
+
+### Grounded findings
+- Phases 1–3 render correctly (even hex tiling on sphere, board, and an
+  infinite disk patch around the camera). Verified by image inspection.
+- **Color bands wash out**: `colorForHeight` maps against a fixed ceiling
+  `1.35*heightScale`, but real terrain reaches only ~10–45% of it, so the
+  forest/rock/snow bands rarely appear (board ≈ sand+grass; planet biased low).
+  → Phase 4: color from the sampler's real biome/climate classifier (+ a height
+  tint) so hex tiles match the smooth terrain's biomes.
 
 Each phase: implement → `npm run build` green → commit → push to `claude/h3-hexagons-tiles-87cp3l`.

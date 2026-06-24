@@ -30,7 +30,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # enablement: true turns Pages on with "GitHub Actions" as the source via
+      # the API, so no manual Settings step is needed (requires the workflow to
+      # have admin/pages permission; if it fails, enable Pages manually once).
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

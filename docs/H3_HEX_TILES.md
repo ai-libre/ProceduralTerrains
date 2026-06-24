@@ -39,7 +39,7 @@ github.com). The npm registry is allowlisted, so we depend on the official
 
 ### Follow-up phases (user-requested polish round)
 - [x] Phase 6  — **Board-game polish**: beveled / inset tile tops so hexes read as discrete tabletop pieces (visible gaps + edge definition).
-- [ ] Phase 7  — **Loading overlay on toggle**: cover the one-time build hitch when enabling hex tiles / changing resolution (like the planet rebuild overlay).
+- [x] Phase 7  — **Loading overlay on toggle**: cover the one-time build hitch when enabling hex tiles / changing resolution (like the planet rebuild overlay).
 - [ ] Phase 8  — **Frustum culling**: split the tile field into spatial sub-meshes with bounds so three.js culls off-screen tiles per frame (pairs with LOD; big win zoomed in).
 
 ## Verification & perf (tools/h3verify.mjs — all checks pass)

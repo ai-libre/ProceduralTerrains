@@ -42,7 +42,7 @@ const INF_STEP = [
   { res: 7, rings: 18 },  // ~1027 tiles, ~378u radius
 ];
 
-/** Elevation-banded linear-RGB color from the palette. */
+/** Elevation-banded linear-RGB color (legacy fallback; kept for the harness). */
 export function colorForHeight(terrainH, seaLevel, maxLandH, pal) {
   if (terrainH <= seaLevel) {
     const d = seaLevel > 0 ? Math.min(1, (seaLevel - terrainH) / seaLevel) : 0;
@@ -56,6 +56,43 @@ export function colorForHeight(terrainH, seaLevel, maxLandH, pal) {
   if (t < 0.82) return mix(pal.rock, pal.rockHi, (t - 0.60) / 0.22);
   if (t < 0.93) return pal.rockHi;
   return pal.snow;
+}
+
+// Phase 4: color each tile from the sampler's REAL biome classifier (so hex
+// tiles match the smooth terrain), modulated by absolute height — a beach band
+// just above the shore and a snow cap on high ground. `biome` is the dominant
+// label (Desert / Canyon / Wetland / Mountains / Forest).
+const SNOW_START = 0.30;  // × heightScale (above sea) where snow begins
+const SNOW_FULL = 0.72;   // × heightScale where snow is full
+const BEACH_BAND = 0.018; // × heightScale just above sea → sand
+
+/** Linear-RGB color for a tile from its biome + absolute height. */
+export function colorForCell(biome, terrainH, seaLevel, heightScale, pal) {
+  if (terrainH <= seaLevel) {
+    const d = seaLevel > 0 ? Math.min(1, (seaLevel - terrainH) / seaLevel) : 0;
+    return mix(pal.shallow, pal.deep, d);
+  }
+  const above = terrainH - seaLevel;
+  if (above < BEACH_BAND * heightScale) return pal.sand;
+
+  let base;
+  switch (biome) {
+    case 'Desert':    base = mix(pal.sand, pal.dune, 0.5); break;
+    case 'Canyon':    base = mix(pal.redRock, pal.redRock2, 0.5); break;
+    case 'Wetland':   base = mix(pal.swamp, pal.grass, 0.4); break;
+    case 'Mountains': base = mix(pal.rock, pal.rockHi, 0.4); break;
+    default:          base = mix(pal.grass, pal.forest, 0.5); break; // Forest
+  }
+
+  // snow cap (deserts stay bare — hot)
+  if (biome !== 'Desert') {
+    const s0 = SNOW_START * heightScale, s1 = SNOW_FULL * heightScale;
+    if (above > s0) {
+      const t = Math.min(1, (above - s0) / Math.max(s1 - s0, 1e-3));
+      base = mix(base, pal.snow, t * 0.92);
+    }
+  }
+  return base;
 }
 
 function mix(a, b, t) {
@@ -106,7 +143,6 @@ export class HexTileLayer {
     const pal = o.palette || EARTH_PALETTE;
     const radius = o.radius;
     const seaLevel = o.seaLevel;
-    const maxLandH = MAX_LAND_01 * o.heightScale;
     const seaRadius = radius + seaLevel;
 
     const builder = new HexTileMeshBuilder({
@@ -134,7 +170,8 @@ export class HexTileLayer {
         top[i] = [d[0] * t, d[1] * t, d[2] * t];
         base[i] = [d[0] * radius, d[1] * radius, d[2] * radius];
       }
-      const color = colorForHeight(terrainH, seaLevel, maxLandH, pal);
+      const biome = sampler.biomeAt3D(cd[0], cd[1], cd[2]).label;
+      const color = colorForCell(biome, terrainH, seaLevel, o.heightScale, pal);
       builder.addCell(top, base, color);
     }
 
@@ -169,7 +206,6 @@ export class HexTileLayer {
     const pal = o.palette || EARTH_PALETTE;
     const sampler = o.sampler;
     const seaLevel = o.seaLevel;
-    const maxLandH = MAX_LAND_01 * o.heightScale;
     const halfWorld = o.boardSize / 2;
     const halfDeg = BOARD_PATCH_DEG;
     const absRes = BOARD_BASE_RES + clampInt(o.resolution, 0, BOARD_MAX_STEP);
@@ -198,7 +234,8 @@ export class HexTileLayer {
         top[i] = [p[0], topY, p[1]];
         base[i] = [p[0], 0, p[1]];
       }
-      builder.addCell(top, base, colorForHeight(terrainH, seaLevel, maxLandH, pal));
+      const biome = sampler.biomeAt(cxz[0], cxz[1]).label;
+      builder.addCell(top, base, colorForCell(biome, terrainH, seaLevel, o.heightScale, pal));
     }
 
     this._swapMesh(builder);
@@ -236,7 +273,6 @@ export class HexTileLayer {
     const pal = o.palette || EARTH_PALETTE;
     const sampler = o.sampler;
     const seaLevel = o.seaLevel;
-    const maxLandH = MAX_LAND_01 * o.heightScale;
     const builder = new HexTileMeshBuilder({
       sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42),
     });
@@ -257,7 +293,8 @@ export class HexTileLayer {
         top[i] = [x, topY, z];
         base[i] = [x, 0, z];
       }
-      builder.addCell(top, base, colorForHeight(terrainH, seaLevel, maxLandH, pal));
+      const biome = sampler.biomeAt(cx, cz).label;
+      builder.addCell(top, base, colorForCell(biome, terrainH, seaLevel, o.heightScale, pal));
     }
 
     this._swapMesh(builder);

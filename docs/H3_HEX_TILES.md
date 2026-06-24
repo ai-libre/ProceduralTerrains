@@ -33,7 +33,7 @@ github.com). The npm registry is allowlisted, so we depend on the official
 - [x] Phase 1  — Core: `h3util` + `HexTileMesh` + `HexTileLayer`; wire **Planet** mode behind a `hexTiles` toggle + `hexResolution`; UI toggle. Build green.
 - [x] Phase 2  — **Tile (flat board)** hex tiles (planar H3 patch → board XZ).
 - [x] Phase 3  — **Infinite World** hex tiles (camera-following H3 disk patch, rebuilt on center-cell change).
-- [ ] Phase 4  — Biome coloring from the real climate classifier + water, sun-baked flat shading, polish.
+- [x] Phase 4  — Biome coloring from the real climate classifier + water, beach band + snow caps. Verified: board now shows distinct desert/canyon/forest/water; planet shows the full biome range instead of washing to sand.
 - [ ] Phase 5  — Perf (LOD by H3 resolution / distance), verification, README/docs.
 
 ## Objective feedback loop

@@ -16,7 +16,7 @@ import zlib from 'node:zlib';
 import fs from 'node:fs';
 import { TerrainHeightSampler } from '../src/engine/terrain/TerrainHeightSampler.js';
 import { PlanetHeightSampler } from '../src/engine/terrain/PlanetHeightSampler.js';
-import { colorForHeight } from '../src/engine/h3/HexTileLayer.js';
+import { colorForHeight, colorForCell } from '../src/engine/h3/HexTileLayer.js';
 import { EARTH_PALETTE } from '../src/engine/style/ColorPalette.js';
 import {
   planetCells, patchCells, diskCells, cellBoundaryDirs, cellCenterDir,
@@ -149,7 +149,8 @@ function renderBoard(p, { res = 0, size = 768 } = {}) {
     const water = th <= p.seaLevel;
     stat.cells++; if (water) stat.water++;
     stat.hMin = Math.min(stat.hMin, th); stat.hMax = Math.max(stat.hMax, th); stat.hSum += th;
-    const color = colorForHeight(th, p.seaLevel, MAX_LAND_01 * p.heightScale, EARTH_PALETTE);
+    const biome = sampler.biomeAt(cxz[0], cxz[1]).label;
+    const color = colorForCell(biome, th, p.seaLevel, p.heightScale, EARTH_PALETTE);
     // top-face shade: normal = +Y → ndotl = sun.y; gentle relief tint by height
     const shade = 0.55 + 0.45 * Math.max(sun[1], 0) * (0.7 + 0.3 * Math.min(1, th / (p.heightScale)));
     const ring = cellToBoundary(h3).map(([lat, lng]) => { latLngToXZ(lat, lng, halfDeg, halfWorld, 0, 0, pp); return W2P(pp[0], pp[1]); });
@@ -189,7 +190,8 @@ function renderPlanet(p, { res = 1, size = 768 } = {}) {
       const den = dot(d, cd); const t = den > 1e-4 ? topR / den : topR;
       return project(d[0] * t, d[1] * t, d[2] * t);
     });
-    const color = colorForHeight(th, p.seaLevel, MAX_LAND_01 * p.heightScale, EARTH_PALETTE);
+    const biome = sampler.biomeAt3D(cd[0], cd[1], cd[2]).label;
+    const color = colorForCell(biome, th, p.seaLevel, p.heightScale, EARTH_PALETTE);
     const shade = 0.32 + 0.68 * Math.max(dot(cd, sun), 0);
     tiles.push({ depth: dot(cd, cam) * (radius + th), poly, color, shade });
   }
@@ -208,8 +210,7 @@ function renderInfinite(p, { res = 1, size = 768, camX = 4200, camZ = -2600 } = 
   const centerLat = Math.max(-89, Math.min(89, camZ / upd)), centerLng = Math.max(-179, Math.min(179, camX / upd));
   const buf = makeCanvas(size, size);
   const cells = diskCells(STEP.res, centerLat, centerLng, STEP.rings);
-  // view window: world span fits the patch
-  const half = STEP.rings * STEP.res * 0; // placeholder
+  // view window: world span fits the patch (rings × per-cell degree spacing × scale)
   const span = STEP.rings * (upd * (STEP.res === 5 ? 0.1246 : STEP.res === 6 ? 0.0462 : 0.0178)) * 1.15;
   const W2P = (x, z) => [((x - camX) / span * 0.5 + 0.5) * size, ((z - camZ) / span * 0.5 + 0.5) * size];
   const stat = { cells: 0, water: 0, hMin: Infinity, hMax: -Infinity, hSum: 0 };
@@ -218,7 +219,8 @@ function renderInfinite(p, { res = 1, size = 768, camX = 4200, camZ = -2600 } = 
     const th = sampler.heightAt(clng * upd, clat * upd);
     const water = th <= p.seaLevel; stat.cells++; if (water) stat.water++;
     stat.hMin = Math.min(stat.hMin, th); stat.hMax = Math.max(stat.hMax, th); stat.hSum += th;
-    const color = colorForHeight(th, p.seaLevel, MAX_LAND_01 * p.heightScale, EARTH_PALETTE);
+    const biome = sampler.biomeAt(clng * upd, clat * upd).label;
+    const color = colorForCell(biome, th, p.seaLevel, p.heightScale, EARTH_PALETTE);
     const shade = 0.6 + 0.4 * Math.max(sun[1], 0);
     const ring = cellToBoundary(h3).map(([lat, lng]) => W2P(lng * upd, lat * upd));
     fillPoly(buf, size, size, ring, color, shade);

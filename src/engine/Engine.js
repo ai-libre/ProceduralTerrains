@@ -4,6 +4,7 @@ import { createWaterMaterial, createInfiniteWaterMaterial, rebuildWaterShaderSou
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
 import { PlanetWorld } from './terrain/PlanetWorld.js';
+import { HexTileLayer } from './h3/HexTileLayer.js';
 import { PlanetCloudChunks } from './sky/PlanetCloudChunks.js';
 import { PlanetCloudLayer } from './sky/PlanetCloudLayer.js';
 import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
@@ -157,6 +158,10 @@ export class Engine {
     this.planetCloudLayer = null;
     this.planetHeightBaker = null;   // bakes the static height field → cubemap
     this._bakedTerrainGen = -1;      // terrain generation the cubemap was baked at
+
+    // H3 discrete hex-tile layer (board-game tiles) — lazily created, shared
+    // across modes; visibility + geometry driven by params.hexTiles
+    this.hexTileLayer = null;
 
     // Studio (flat board) height/normal bake: replaces the per-pixel height
     // field in the studio terrain + water shaders with a single texture fetch.
@@ -579,6 +584,12 @@ export class Engine {
     if (key === 'planetRadius' || key === 'planetFaceGrid') {
       if (this.worldMode === 'planet') this._rebuildPlanet();
       else this._applyUniforms();
+      return;
+    }
+
+    // H3 hex tiles: pure overlay layer — no terrain rebuild, just resync.
+    if (key === 'hexTiles' || key === 'hexResolution') {
+      this._syncHexTiles();
       return;
     }
 
@@ -1990,6 +2001,45 @@ export class Engine {
     this.planetWater.visible = this.params.seaLevel > 0.5;
   }
 
+  /**
+   * Build / show / hide the H3 discrete hex-tile layer. When hex tiles are on
+   * in planet mode we replace the smooth cube-sphere mesh + water shell with
+   * flat-topped hex columns sampled from the Noise Stack. Cheap to call every
+   * frame — the layer skips rebuilds when nothing relevant changed.
+   * (Phase 1: planet only; board / infinite added in later phases.)
+   */
+  _syncHexTiles() {
+    const active = !!this.params.hexTiles && this.worldMode === 'planet';
+
+    if (!active) {
+      if (this.hexTileLayer) this.hexTileLayer.setVisible(false);
+      // restore the smooth planet surface if it was hidden
+      if (this.worldMode === 'planet') {
+        if (this.planetWorld) this.planetWorld.group.visible = true;
+        this._updatePlanetWater();
+      }
+      return;
+    }
+
+    if (!this.hexTileLayer) this.hexTileLayer = new HexTileLayer(this.scene);
+    this.hexTileLayer.buildPlanet({
+      sampler: this._getPlanetSampler(),
+      radius: this._planetRadius(),
+      seaLevel: this.params.seaLevel,
+      heightScale: this.params.heightScale,
+      resolution: Math.round(this.params.hexResolution),
+      palette: this.planetStyle?.getStyle?.().palette,
+      sunAzimuth: this.params.sunAzimuth,
+      sunElevation: this.params.sunElevation,
+      terrainGen: this._terrainGen,
+    });
+    this.hexTileLayer.setVisible(true);
+    // hide the smooth surface + water shell so only the hex tiles show
+    if (this.planetWorld) this.planetWorld.group.visible = false;
+    if (this.planetWater) this.planetWater.visible = false;
+    this._needsRender = true;
+  }
+
   async _warmupPlanetShaders(oct) {
     const key = `planet:${oct}`;
     if (this._compiledKeys.has(key)) {
@@ -2041,6 +2091,7 @@ export class Engine {
     if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
     if (this.proceduralSky) { this.proceduralSky.dispose(); this.proceduralSky = null; }
     if (this.planetMaterial) { this.planetMaterial.dispose(); this.planetMaterial = null; }
+    if (this.hexTileLayer) { this.hexTileLayer.dispose(); this.hexTileLayer = null; }
   }
 
   // -------------------------------------------------------- infinite controls
@@ -2818,6 +2869,7 @@ export class Engine {
     }
 
     if (this.planetWorld) this.planetWorld.update(this.camera.position, this.camera, this._debug);
+    this._syncHexTiles();
     if (this.planetCloudChunks) {
       this.planetCloudChunks.update(dt, this.camera.position, this.uniforms.uSunDir.value, this.camera, this.planetWorld, this._debug);
     }

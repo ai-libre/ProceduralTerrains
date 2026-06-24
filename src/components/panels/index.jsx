@@ -166,6 +166,39 @@ function WorldPanel({ ctx }) {
   );
 }
 
+const HEX_RES_OPTIONS = [
+  { value: 0, label: 'Res 0 — 122 cells (coarse)' },
+  { value: 1, label: 'Res 1 — 842 cells' },
+  { value: 2, label: 'Res 2 — 5,882 cells' },
+  { value: 3, label: 'Res 3 — 41,162 cells (heavy)' },
+];
+
+function HexTilesSection({ params, onParam }) {
+  return (
+    <CollapsibleGroup title="Hex Tiles (H3)" defaultOpen={!!params.hexTiles}>
+      <p className="section-hint">
+        Replace the smooth globe with discrete Uber-H3 hexagons — each cell a
+        flat-topped column whose height + color come from the noise layers.
+      </p>
+      <ToggleRow
+        label="Hex Tiles"
+        value={!!params.hexTiles}
+        onChange={(v) => onParam('hexTiles', v)}
+        info="Render the planet as discrete H3 hexagonal tiles (board-game look)."
+      />
+      {params.hexTiles && (
+        <SelectRow
+          label="H3 Resolution"
+          value={Math.round(params.hexResolution ?? 1)}
+          options={HEX_RES_OPTIONS}
+          onChange={(v) => onParam('hexResolution', Number(v))}
+          info="Higher = smaller, more numerous hexagons (and more triangles)."
+        />
+      )}
+    </CollapsibleGroup>
+  );
+}
+
 function PlanetPanel({ ctx }) {
   const isPlanet = ctx.worldMode === 'planet';
   const { title, desc } = getPanelDisplay('planet', ctx.worldMode);
@@ -174,6 +207,7 @@ function PlanetPanel({ ctx }) {
       {isPlanet && (
         <>
           <WorldPanelInner params={ctx.params} worldMode="planet" onParam={ctx.onParam} />
+          <HexTilesSection params={ctx.params} onParam={ctx.onParam} />
           <PlanetStylePanel {...ctx.planetStyleProps} settingsTarget={ctx.settingsTarget} embedded />
           <PlanetSummaryCard params={ctx.params} />
         </>

@@ -47,6 +47,12 @@ export const DEFAULT_PARAMS = {
   // planet mode: chunks per cube-face side (the spherical "chunk count")
   planetFaceGrid: 8,
 
+  // H3 discrete hex tiles ("board-game" look): when on, the smooth terrain is
+  // replaced by flat-topped hex columns from Uber's H3 grid, height + color
+  // sampled from the Noise Stack at each cell center.
+  hexTiles: false,
+  hexResolution: 1,        // H3 resolution (0..3 for the planet globe)
+
   wireframe: false,
   lodDebug: false,
   autoUpdate: true,

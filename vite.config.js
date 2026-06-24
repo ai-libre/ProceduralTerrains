@@ -1,7 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // Relative base for production so the build works under a GitHub Pages project
+  // subpath (https://<owner>.github.io/<repo>/) without hardcoding the repo name.
+  // Dev server stays at '/'. There is no client-side router, so no SPA fallback
+  // is needed — a single index.html + relative assets is enough.
+  base: command === 'build' ? './' : '/',
   plugins: [react()],
   server: {
     port: 6061,
@@ -21,4 +26,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

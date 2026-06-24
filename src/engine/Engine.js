@@ -2009,35 +2009,69 @@ export class Engine {
    * (Phase 1: planet only; board / infinite added in later phases.)
    */
   _syncHexTiles() {
-    const active = !!this.params.hexTiles && this.worldMode === 'planet';
+    const supported = this.worldMode === 'planet' || this.worldMode === 'studio';
+    const active = !!this.params.hexTiles && supported;
 
     if (!active) {
       if (this.hexTileLayer) this.hexTileLayer.setVisible(false);
-      // restore the smooth planet surface if it was hidden
+      // restore whatever smooth surface this mode hides while hex tiles are on
       if (this.worldMode === 'planet') {
         if (this.planetWorld) this.planetWorld.group.visible = true;
         this._updatePlanetWater();
+      } else if (this.worldMode === 'studio') {
+        if (this.board) this.board.group.visible = true;
+        this.waterSystem?.sync(this.params, this.worldMode);
       }
       return;
     }
 
     if (!this.hexTileLayer) this.hexTileLayer = new HexTileLayer(this.scene);
-    this.hexTileLayer.buildPlanet({
-      sampler: this._getPlanetSampler(),
-      radius: this._planetRadius(),
-      seaLevel: this.params.seaLevel,
-      heightScale: this.params.heightScale,
-      resolution: Math.round(this.params.hexResolution),
-      palette: this.planetStyle?.getStyle?.().palette,
-      sunAzimuth: this.params.sunAzimuth,
-      sunElevation: this.params.sunElevation,
-      terrainGen: this._terrainGen,
-    });
+
+    if (this.worldMode === 'planet') {
+      this.hexTileLayer.buildPlanet({
+        sampler: this._getPlanetSampler(),
+        radius: this._planetRadius(),
+        seaLevel: this.params.seaLevel,
+        heightScale: this.params.heightScale,
+        resolution: Math.round(this.params.hexResolution),
+        palette: this.planetStyle?.getStyle?.().palette,
+        sunAzimuth: this.params.sunAzimuth,
+        sunElevation: this.params.sunElevation,
+        terrainGen: this._terrainGen,
+      });
+      if (this.planetWorld) this.planetWorld.group.visible = false;
+      if (this.planetWater) this.planetWater.visible = false;
+    } else {
+      this.hexTileLayer.buildBoard({
+        sampler: this._getHexBoardSampler(),
+        boardSize: this.boardSize,
+        seaLevel: this.params.seaLevel,
+        heightScale: this.params.heightScale,
+        resolution: Math.round(this.params.hexResolution),
+        palette: this.planetStyle?.getStyle?.().palette,
+        sunAzimuth: this.params.sunAzimuth,
+        sunElevation: this.params.sunElevation,
+        terrainGen: this._terrainGen,
+      });
+      if (this.board) this.board.group.visible = false;
+      if (this.water) this.water.visible = false;
+    }
+
     this.hexTileLayer.setVisible(true);
-    // hide the smooth surface + water shell so only the hex tiles show
-    if (this.planetWorld) this.planetWorld.group.visible = false;
-    if (this.planetWater) this.planetWater.visible = false;
     this._needsRender = true;
+  }
+
+  /** CPU height sampler for flat-board hex tiles (tracks the live noise stack). */
+  _getHexBoardSampler() {
+    if (!this._hexBoardSampler) {
+      this._hexBoardSampler = new TerrainHeightSampler(this.uniforms, () => ({
+        octaves: Math.round(this.params.octaves),
+        infinite: false,
+      }), this.noiseStack);
+    } else {
+      this._hexBoardSampler.setStack(this.noiseStack);
+    }
+    return this._hexBoardSampler;
   }
 
   async _warmupPlanetShaders(oct) {
@@ -2723,6 +2757,9 @@ export class Engine {
       this.controls.update(dt);
     }
 
+    // keep the hex-tile mesh in sync with live edits (cheap signature guard)
+    if (this.params.hexTiles) this._syncHexTiles();
+
     // FPS accounting runs every tick regardless of whether we draw.
     this._frames++;
     if (now - this._fpsTime >= 1000) {
@@ -2869,7 +2906,7 @@ export class Engine {
     }
 
     if (this.planetWorld) this.planetWorld.update(this.camera.position, this.camera, this._debug);
-    this._syncHexTiles();
+    if (this.params.hexTiles) this._syncHexTiles();
     if (this.planetCloudChunks) {
       this.planetCloudChunks.update(dt, this.camera.position, this.uniforms.uSunDir.value, this.camera, this.planetWorld, this._debug);
     }
@@ -2951,6 +2988,7 @@ export class Engine {
     if (this.worldMode === 'infinite') this._disposeInfinite();
     else if (this.worldMode === 'planet') this._disposePlanet();
     else if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
+    if (this.hexTileLayer) { this.hexTileLayer.dispose(); this.hexTileLayer = null; }
     if (this.studioCloud) { this.studioCloud.dispose(); this.studioCloud = null; }
     if (this.terrainHeightBaker) { this.terrainHeightBaker.dispose(); this.terrainHeightBaker = null; }
     if (this.proceduralSky) { this.proceduralSky.dispose(); this.proceduralSky = null; }

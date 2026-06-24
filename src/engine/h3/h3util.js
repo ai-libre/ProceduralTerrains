@@ -19,6 +19,9 @@ import {
   polygonToCells,
 } from 'h3-js';
 
+// re-exported so mode code can read raw cell geometry without a 2nd h3-js import
+export { cellToLatLng, cellToBoundary } from 'h3-js';
+
 const DEG2RAD = Math.PI / 180;
 
 // Practical cap on planet cell count per resolution so we never try to build a

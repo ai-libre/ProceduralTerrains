@@ -13,10 +13,22 @@
 
 import * as THREE from 'three';
 import { HexTileMeshBuilder, makeHexTileMaterial, sunDirection } from './HexTileMesh.js';
-import { planetCells, cellBoundaryDirs, cellCenterDir } from './h3util.js';
+import {
+  planetCells, cellBoundaryDirs, cellCenterDir,
+  patchCells, latLngToXZ, cellToLatLng, cellToBoundary,
+} from './h3util.js';
 import { EARTH_PALETTE } from '../style/ColorPalette.js';
 
-const MAX_LAND_01 = 1.35; // heightAt3D clamps shape to [0,1.35] before scaling
+const MAX_LAND_01 = 1.35; // heightAt clamps shape to [0,1.35] before scaling
+
+// Flat board / infinite: H3 cells covering this lat/lng half-window (degrees)
+// are projected (equirectangular, centered on the equator → minimal distortion)
+// onto the board's XZ plane. Base H3 resolution + UI step give the tile density.
+const BOARD_PATCH_DEG = 8;
+const BOARD_BASE_RES = 3;   // UI res 0→3 (336 cells) .. 2→5 (16k cells)
+const BOARD_MAX_STEP = 2;
+
+function clampInt(v, lo, hi) { v = v | 0; return v < lo ? lo : v > hi ? hi : v; }
 
 /** Elevation-banded linear-RGB color from the palette. */
 function colorForHeight(terrainH, seaLevel, maxLandH, pal) {
@@ -112,6 +124,69 @@ export class HexTileLayer {
       }
       const color = colorForHeight(terrainH, seaLevel, maxLandH, pal);
       builder.addCell(top, base, color);
+    }
+
+    this._swapMesh(builder);
+  }
+
+  /**
+   * Build the flat-board hex tiles. H3 cells over a small equatorial lat/lng
+   * patch are projected onto the board's XZ plane; each cell's height + color
+   * come from TerrainHeightSampler at the projected cell center.
+   *
+   * @param {object} o
+   * @param {TerrainHeightSampler} o.sampler   reads (x,z) world height
+   * @param {number} o.boardSize   full board size (world units)
+   * @param {number} o.seaLevel
+   * @param {number} o.heightScale
+   * @param {number} o.resolution  UI H3 step (0..2 → H3 res 3..5)
+   * @param {object} [o.palette]
+   * @param {number} [o.sunAzimuth]
+   * @param {number} [o.sunElevation]
+   * @param {number} [o.terrainGen]
+   */
+  buildBoard(o) {
+    const sig = [
+      'board', clampInt(o.resolution, 0, BOARD_MAX_STEP), Math.round(o.boardSize),
+      Math.round(o.seaLevel), Math.round(o.heightScale),
+      o.sunAzimuth, o.sunElevation, o.terrainGen ?? 0,
+    ].join('|');
+    if (sig === this._signature && this.mesh) return;
+    this._signature = sig;
+
+    const pal = o.palette || EARTH_PALETTE;
+    const sampler = o.sampler;
+    const seaLevel = o.seaLevel;
+    const maxLandH = MAX_LAND_01 * o.heightScale;
+    const halfWorld = o.boardSize / 2;
+    const halfDeg = BOARD_PATCH_DEG;
+    const absRes = BOARD_BASE_RES + clampInt(o.resolution, 0, BOARD_MAX_STEP);
+
+    const builder = new HexTileMeshBuilder({
+      sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42),
+    });
+
+    const cells = patchCells(absRes, halfDeg);
+    const cxz = [0, 0], p = [0, 0];
+    for (const h3 of cells) {
+      const [clat, clng] = cellToLatLng(h3);
+      latLngToXZ(clat, clng, halfDeg, halfWorld, 0, 0, cxz);
+      // clip to the board square (ragged hex edge is fine / natural)
+      if (Math.abs(cxz[0]) > halfWorld || Math.abs(cxz[1]) > halfWorld) continue;
+
+      const terrainH = sampler.heightAt(cxz[0], cxz[1]);
+      const isWater = terrainH <= seaLevel;
+      const topY = isWater ? seaLevel : terrainH;
+
+      const ring = cellToBoundary(h3);
+      const top = new Array(ring.length);
+      const base = new Array(ring.length);
+      for (let i = 0; i < ring.length; i++) {
+        latLngToXZ(ring[i][0], ring[i][1], halfDeg, halfWorld, 0, 0, p);
+        top[i] = [p[0], topY, p[1]];
+        base[i] = [p[0], 0, p[1]];
+      }
+      builder.addCell(top, base, colorForHeight(terrainH, seaLevel, maxLandH, pal));
     }
 
     this._swapMesh(builder);

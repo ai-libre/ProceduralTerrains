@@ -31,7 +31,7 @@ github.com). The npm registry is allowlisted, so we depend on the official
 ## Phases (self-loop)
 - [x] Phase 0  — Understand codebase; install `h3-js`; write this goal.
 - [x] Phase 1  — Core: `h3util` + `HexTileMesh` + `HexTileLayer`; wire **Planet** mode behind a `hexTiles` toggle + `hexResolution`; UI toggle. Build green.
-- [ ] Phase 2  — **Tile (flat board)** hex tiles (planar H3 patch → board XZ).
+- [x] Phase 2  — **Tile (flat board)** hex tiles (planar H3 patch → board XZ).
 - [ ] Phase 3  — **Infinite World** hex tiles (camera-following H3 patch, streamed).
 - [ ] Phase 4  — Biome coloring from the live palette + water (cells below sea level), sun-baked flat shading, polish.
 - [ ] Phase 5  — Perf (LOD by H3 resolution / distance), verification, README/docs.

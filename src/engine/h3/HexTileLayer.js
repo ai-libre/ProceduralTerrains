@@ -17,7 +17,7 @@ import {
   planetCells, cellBoundaryDirs, cellCenterDir,
   patchCells, diskCells, latLngToXZ, cellToLatLng, cellToBoundary,
 } from './h3util.js';
-import { latLngToCell, cellToChildren } from 'h3-js';
+import { latLngToCell, cellToChildren, cellToParent } from 'h3-js';
 import { EARTH_PALETTE } from '../style/ColorPalette.js';
 
 const MAX_LAND_01 = 1.35; // heightAt clamps shape to [0,1.35] before scaling
@@ -129,8 +129,13 @@ export class HexTileLayer {
     this.scene.add(this.group);
 
     this.material = makeHexTileMaterial();
-    this.mesh = null;
+    // Spatial sub-meshes: the tile field is split into groups (planet: res-0
+    // parent; board/infinite: a coarse world-XZ grid), each its own Mesh with a
+    // bounding sphere + frustumCulled=true so three.js culls off-screen groups
+    // per frame — no CPU rebuild when the camera only rotates.
+    this.meshes = [];
     this.cellCount = 0;
+    this.groupCount = 0;
     this._signature = null;
   }
 
@@ -165,18 +170,15 @@ export class HexTileLayer {
       'planet', nearRes, lod ? 1 : 0, qd, Math.round(o.radius), Math.round(o.seaLevel),
       Math.round(o.heightScale), o.sunAzimuth, o.sunElevation, o.terrainGen ?? 0,
     ].join('|');
-    if (sig === this._signature && this.mesh) return;
+    if (sig === this._signature && this.meshes.length) return;
     this._signature = sig;
 
     const pal = o.palette || EARTH_PALETTE;
     const radius = o.radius;
     const seaLevel = o.seaLevel;
     const seaRadius = radius + seaLevel;
-
-    const builder = new HexTileMeshBuilder({
-      sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42),
-      bevel: TILE_BEVEL,
-    });
+    const opts = { sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42), bevel: TILE_BEVEL };
+    const groups = new Map();   // res-0 parent → builder (spatial groups for frustum culling)
 
     const sampler = o.sampler;
     const cells = lod ? this._planetLodCells(nearRes, camDir) : planetCells(nearRes);
@@ -201,10 +203,10 @@ export class HexTileLayer {
       }
       const biome = sampler.biomeAt3D(cd[0], cd[1], cd[2]).label;
       const color = colorForCell(biome, terrainH, seaLevel, o.heightScale, pal);
-      builder.addCell(top, base, color);
+      this._group(groups, cellToParent(h3, 0), opts).addCell(top, base, color);
     }
 
-    this._swapMesh(builder);
+    this._swapMeshes(groups);
   }
 
   /**
@@ -236,17 +238,15 @@ export class HexTileLayer {
       Math.round(o.boardSize), Math.round(o.seaLevel), Math.round(o.heightScale),
       o.sunAzimuth, o.sunElevation, o.terrainGen ?? 0,
     ].join('|');
-    if (sig === this._signature && this.mesh) return;
+    if (sig === this._signature && this.meshes.length) return;
     this._signature = sig;
 
     const pal = o.palette || EARTH_PALETTE;
     const sampler = o.sampler;
     const seaLevel = o.seaLevel;
-
-    const builder = new HexTileMeshBuilder({
-      sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42),
-      bevel: TILE_BEVEL,
-    });
+    const opts = { sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42), bevel: TILE_BEVEL };
+    const groups = new Map();
+    const gstep = halfWorld / 3;   // ~6×6 spatial groups across the board
 
     const cells = lod
       ? this._boardLodCells(nearAbsRes, halfDeg, halfWorld, camX, camZ)
@@ -271,10 +271,11 @@ export class HexTileLayer {
         base[i] = [p[0], 0, p[1]];
       }
       const biome = sampler.biomeAt(cxz[0], cxz[1]).label;
-      builder.addCell(top, base, colorForCell(biome, terrainH, seaLevel, o.heightScale, pal));
+      const key = `${Math.round(cxz[0] / gstep)},${Math.round(cxz[1] / gstep)}`;
+      this._group(groups, key, opts).addCell(top, base, colorForCell(biome, terrainH, seaLevel, o.heightScale, pal));
     }
 
-    this._swapMesh(builder);
+    this._swapMeshes(groups);
   }
 
   /**
@@ -304,16 +305,15 @@ export class HexTileLayer {
       'inf', step.res, step.rings, lod ? 1 : 0, centerCell, Math.round(o.seaLevel),
       Math.round(o.heightScale), o.sunAzimuth, o.sunElevation, o.terrainGen ?? 0,
     ].join('|');
-    if (sig === this._signature && this.mesh) return false;
+    if (sig === this._signature && this.meshes.length) return false;
     this._signature = sig;
 
     const pal = o.palette || EARTH_PALETTE;
     const sampler = o.sampler;
     const seaLevel = o.seaLevel;
-    const builder = new HexTileMeshBuilder({
-      sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42),
-      bevel: TILE_BEVEL,
-    });
+    const opts = { sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42), bevel: TILE_BEVEL };
+    const groups = new Map();
+    const gstep = (SPACING_DEG[step.res] ?? 0.05) * upd * 4;   // ~4-cell-wide groups
 
     const cells = lod
       ? this._infiniteLodCells(step.res, upd, centerLat, centerLng, o.cameraX, o.cameraZ, step.rings)
@@ -334,10 +334,11 @@ export class HexTileLayer {
         base[i] = [x, 0, z];
       }
       const biome = sampler.biomeAt(cx, cz).label;
-      builder.addCell(top, base, colorForCell(biome, terrainH, seaLevel, o.heightScale, pal));
+      const key = `${Math.round(cx / gstep)},${Math.round(cz / gstep)}`;
+      this._group(groups, key, opts).addCell(top, base, colorForCell(biome, terrainH, seaLevel, o.heightScale, pal));
     }
 
-    this._swapMesh(builder);
+    this._swapMeshes(groups);
     return true;
   }
 
@@ -405,22 +406,33 @@ export class HexTileLayer {
     return out;
   }
 
-  _swapMesh(builder) {
-    if (this.mesh) {
-      this.group.remove(this.mesh);
-      this.mesh.geometry.dispose();
-      this.mesh = null;
+  /** Lazily get/create the per-group mesh builder for a spatial key. */
+  _group(map, key, opts) {
+    let b = map.get(key);
+    if (!b) { b = new HexTileMeshBuilder(opts); map.set(key, b); }
+    return b;
+  }
+
+  /** Replace the current sub-meshes with one frustum-cullable mesh per group. */
+  _swapMeshes(groups) {
+    for (const m of this.meshes) { this.group.remove(m); m.geometry.dispose(); }
+    this.meshes = [];
+    let cells = 0;
+    for (const b of groups.values()) {
+      if (b.isEmpty) continue;
+      const mesh = new THREE.Mesh(b.build(), this.material);
+      mesh.frustumCulled = true;     // per-frame frustum cull via the geometry bounds
+      this.group.add(mesh);
+      this.meshes.push(mesh);
+      cells += b.cellCount;
     }
-    if (builder.isEmpty) { this.cellCount = 0; return; }
-    const geo = builder.build();
-    this.mesh = new THREE.Mesh(geo, this.material);
-    this.mesh.frustumCulled = false;
-    this.group.add(this.mesh);
-    this.cellCount = builder.cellCount;
+    this.cellCount = cells;
+    this.groupCount = this.meshes.length;
   }
 
   dispose() {
-    if (this.mesh) { this.group.remove(this.mesh); this.mesh.geometry.dispose(); this.mesh = null; }
+    for (const m of this.meshes) { this.group.remove(m); m.geometry.dispose(); }
+    this.meshes = [];
     this.material.dispose();
     this.scene.remove(this.group);
     this._signature = null;

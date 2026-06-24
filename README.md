@@ -89,6 +89,12 @@ you get near-res detail where you look at a fraction of the triangles (e.g.
 planet res 3: 748k → 62k tris, build ~1.5s → ~235ms). Discrete columns need no
 crack-stitching, so mixed resolutions just sit side by side.
 
+**Frustum culling**: the field is split into spatial sub-meshes (planet: by H3
+res-0 parent; board/infinite: by a coarse world grid), each frustum-cullable, so
+three.js drops off-screen groups per frame with no rebuild on camera rotation.
+Tiles read as discrete pieces via a small top **bevel/inset**, and enabling/
+re-resolving them is covered by a brief loading overlay.
+
 Offline tooling (no WebGL needed): `node tools/h3harness.mjs` rasterizes the
 three modes to `.claude/shots/h3-*.png`, and `node tools/h3verify.mjs` validates
 geometry + reports build timings.

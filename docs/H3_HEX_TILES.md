@@ -40,7 +40,7 @@ github.com). The npm registry is allowlisted, so we depend on the official
 ### Follow-up phases (user-requested polish round)
 - [x] Phase 6  — **Board-game polish**: beveled / inset tile tops so hexes read as discrete tabletop pieces (visible gaps + edge definition).
 - [x] Phase 7  — **Loading overlay on toggle**: cover the one-time build hitch when enabling hex tiles / changing resolution (like the planet rebuild overlay).
-- [ ] Phase 8  — **Frustum culling**: split the tile field into spatial sub-meshes with bounds so three.js culls off-screen tiles per frame (pairs with LOD; big win zoomed in).
+- [x] Phase 8  — **Frustum culling**: split the tile field into spatial sub-meshes with bounds so three.js culls off-screen tiles per frame (pairs with LOD; big win zoomed in).
 
 ## Verification & perf (tools/h3verify.mjs — all checks pass)
 Geometry validity (finite positions, colors in range, watertight tri counts),
@@ -83,8 +83,20 @@ LOD makes res 3 practical and removes the orbit-hitch concern (builds now
 7–235ms). Verified visually: `.claude/shots/h3-planet-lod.png` shows fine hexes
 at the sub-camera point grading to coarse toward the limb, back side culled.
 
-Possible future work: off-thread build for the heaviest cases, a loading overlay
-on toggle, and frustum (not just hemisphere) culling.
+## Frustum culling (Phase 8)
+The tile field is split into spatial sub-meshes — planet: by res-0 parent
+(≤122 groups); board/infinite: by a coarse world-XZ grid — each its own Mesh
+with a bounding sphere and `frustumCulled = true`. three.js then culls
+off-screen groups per frame, with **no CPU rebuild when the camera only
+rotates** (geometry is unchanged; only visibility flips). Pairs with LOD.
+
+Verified (tools/h3verify.mjs): every group has finite bounds + frustumCulled;
+simulating the camera frustum, a zoomed-in planet draws only 42 of 69 groups
+(27 culled), while zoomed-out correctly draws all (whole globe in view).
+Trade-off: more draw calls (1 → tens), worth it for the per-frame GPU savings.
+
+Possible future work: off-thread build for the heaviest cases; merging tiny
+distant groups to trim draw calls.
 
 ## Objective feedback loop
 `tools/h3harness.mjs` drives the REAL engine modules (f32-exact CPU samplers +

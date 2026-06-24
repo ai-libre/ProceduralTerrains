@@ -6,6 +6,7 @@
 // ============================================================================
 
 import { performance } from 'node:perf_hooks';
+import * as THREE from 'three';
 import { TerrainHeightSampler } from '../src/engine/terrain/TerrainHeightSampler.js';
 import { PlanetHeightSampler } from '../src/engine/terrain/PlanetHeightSampler.js';
 import { HexTileLayer } from '../src/engine/h3/HexTileLayer.js';
@@ -41,19 +42,24 @@ let fails = 0;
 function check(name, cond, detail = '') { if (!cond) { fails++; console.log(`  ✗ ${name} ${detail}`); } else console.log(`  ✓ ${name} ${detail}`); }
 
 function validate(label, layer, expectMinCells) {
-  const geo = layer.mesh?.geometry;
-  check(`${label}: mesh built`, !!geo);
-  if (!geo) return;
-  const pos = geo.getAttribute('position').array;
-  const col = geo.getAttribute('color').array;
-  let finite = true, colOk = true;
-  for (let i = 0; i < pos.length; i++) if (!Number.isFinite(pos[i])) { finite = false; break; }
-  for (let i = 0; i < col.length; i++) if (!(col[i] >= 0 && col[i] <= 4)) { colOk = false; break; }
-  const tris = pos.length / 9;
+  check(`${label}: mesh built`, layer.meshes.length > 0);
+  if (!layer.meshes.length) return 0;
+  let finite = true, colOk = true, tris = 0, boundsOk = true;
+  for (const m of layer.meshes) {
+    const geo = m.geometry;
+    const pos = geo.getAttribute('position').array;
+    const col = geo.getAttribute('color').array;
+    for (let i = 0; i < pos.length; i++) if (!Number.isFinite(pos[i])) { finite = false; break; }
+    for (let i = 0; i < col.length; i++) if (!(col[i] >= 0 && col[i] <= 4)) { colOk = false; break; }
+    if (pos.length % 9 !== 0) boundsOk = false;
+    if (!geo.boundingSphere || !Number.isFinite(geo.boundingSphere.radius)) boundsOk = false;
+    if (m.frustumCulled !== true) boundsOk = false;
+    tris += pos.length / 9;
+  }
   check(`${label}: positions finite`, finite);
   check(`${label}: colors in range`, colOk);
   check(`${label}: cellCount ≥ ${expectMinCells}`, layer.cellCount >= expectMinCells, `(got ${layer.cellCount})`);
-  check(`${label}: 3 verts / tri`, pos.length % 9 === 0, `(tris=${tris})`);
+  check(`${label}: groups frustum-cullable w/ bounds`, boundsOk, `(${layer.groupCount} groups)`);
   return tris;
 }
 
@@ -90,7 +96,7 @@ for (const res of [0, 1, 2]) {
 
 // ---- LOD: adaptive vs uniform ----------------------------------------------
 console.log('LOD (adaptive vs uniform; same near resolution)');
-function trisOf(layer) { return layer.mesh ? layer.mesh.geometry.getAttribute('position').count / 3 : 0; }
+function trisOf(layer) { let t = 0; for (const m of layer.meshes) t += m.geometry.getAttribute('position').count / 3; return t; }
 const camDist = P.planetRadius * 2.2;
 const camPos = [0.45 * camDist, 0.35 * camDist, 1.0 * camDist];
 for (const res of [1, 2, 3]) {
@@ -124,12 +130,36 @@ for (const res of [1, 2, 3]) {
   lod.dispose();
 }
 
+// ---- Frustum culling: how many groups survive the camera frustum? -----------
+console.log('\nFrustum culling (groups intersecting the camera frustum)');
+const cam = new THREE.PerspectiveCamera(55, 1, P.planetRadius * 0.05, P.planetRadius * 8);
+for (const zoom of [2.4, 1.25]) {
+  const pos = [0.45, 0.35, 1.0].map((c) => c * P.planetRadius * zoom);
+  cam.position.set(pos[0], pos[1], pos[2]);
+  cam.lookAt(0, 0, 0);
+  cam.updateMatrixWorld(true);
+  cam.updateProjectionMatrix();
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(
+    new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse)
+  );
+  const layer = new HexTileLayer(stubScene);
+  layer.buildPlanet({ sampler: planetSampler, radius: P.planetRadius, seaLevel: P.seaLevel, heightScale: P.heightScale, resolution: 2, lod: true, cameraPos: pos, sunAzimuth: P.sunAzimuth, sunElevation: P.sunElevation, terrainGen: 400 });
+  let visible = 0;
+  for (const m of layer.meshes) if (frustum.intersectsSphere(m.geometry.boundingSphere)) visible++;
+  const total = layer.groupCount;
+  // zoomed out the whole globe is in view (all groups drawn — correct); zoomed
+  // in, off-screen groups must be culled.
+  if (zoom < 2.0) check(`planet zoom ${zoom}×: off-screen groups culled`, visible < total, `(${visible}/${total} groups drawn)`);
+  else check(`planet zoom ${zoom}×: whole globe in view`, visible <= total, `(${visible}/${total} groups drawn)`);
+  layer.dispose();
+}
+
 // signature guard: a 2nd build with identical inputs must NOT rebuild
 const l = new HexTileLayer(stubScene);
 l.buildPlanet({ sampler: planetSampler, radius: P.planetRadius, seaLevel: P.seaLevel, heightScale: P.heightScale, resolution: 1, sunAzimuth: P.sunAzimuth, sunElevation: P.sunElevation, terrainGen: 5 });
-const g1 = l.mesh.geometry;
+const g1 = l.meshes.map((m) => m.geometry);
 l.buildPlanet({ sampler: planetSampler, radius: P.planetRadius, seaLevel: P.seaLevel, heightScale: P.heightScale, resolution: 1, sunAzimuth: P.sunAzimuth, sunElevation: P.sunElevation, terrainGen: 5 });
-check('signature guard skips identical rebuild', l.mesh.geometry === g1);
+check('signature guard skips identical rebuild', l.meshes.length === g1.length && l.meshes.every((m, i) => m.geometry === g1[i]));
 l.dispose();
 
 console.log(`\n${fails === 0 ? 'ALL CHECKS PASSED' : fails + ' CHECK(S) FAILED'}`);

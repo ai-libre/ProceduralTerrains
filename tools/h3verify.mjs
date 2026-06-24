@@ -88,6 +88,42 @@ for (const res of [0, 1, 2]) {
   layer.dispose();
 }
 
+// ---- LOD: adaptive vs uniform ----------------------------------------------
+console.log('LOD (adaptive vs uniform; same near resolution)');
+function trisOf(layer) { return layer.mesh ? layer.mesh.geometry.getAttribute('position').count / 3 : 0; }
+const camDist = P.planetRadius * 2.2;
+const camPos = [0.45 * camDist, 0.35 * camDist, 1.0 * camDist];
+for (const res of [1, 2, 3]) {
+  const uni = new HexTileLayer(stubScene);
+  uni.buildPlanet({ sampler: planetSampler, radius: P.planetRadius, seaLevel: P.seaLevel, heightScale: P.heightScale, resolution: res, sunAzimuth: P.sunAzimuth, sunElevation: P.sunElevation, terrainGen: 100 + res });
+  const uniT = trisOf(uni); uni.dispose();
+  const lod = new HexTileLayer(stubScene);
+  const ms = time(() => lod.buildPlanet({ sampler: planetSampler, radius: P.planetRadius, seaLevel: P.seaLevel, heightScale: P.heightScale, resolution: res, lod: true, cameraPos: camPos, sunAzimuth: P.sunAzimuth, sunElevation: P.sunElevation, terrainGen: 100 + res }));
+  const lodT = validate(`planet res${res} LOD`, lod, 40);
+  console.log(`  planet res${res}: uniform ${uniT} → LOD ${lodT} tris (${(100 * lodT / uniT).toFixed(0)}%) · build ${ms.toFixed(1)}ms\n`);
+  lod.dispose();
+}
+{
+  const uni = new HexTileLayer(stubScene);
+  uni.buildBoard({ sampler: boardSampler, boardSize, seaLevel: P.seaLevel, heightScale: P.heightScale, resolution: 2, sunAzimuth: P.sunAzimuth, sunElevation: P.sunElevation, terrainGen: 200 });
+  const uniT = trisOf(uni); uni.dispose();
+  const lod = new HexTileLayer(stubScene);
+  const ms = time(() => lod.buildBoard({ sampler: boardSampler, boardSize, seaLevel: P.seaLevel, heightScale: P.heightScale, resolution: 2, lod: true, cameraX: 300, cameraZ: 300, sunAzimuth: P.sunAzimuth, sunElevation: P.sunElevation, terrainGen: 200 }));
+  const lodT = validate('board res2 LOD', lod, 100);
+  console.log(`  board res2: uniform ${uniT} → LOD ${lodT} tris (${(100 * lodT / uniT).toFixed(0)}%) · build ${ms.toFixed(1)}ms\n`);
+  lod.dispose();
+}
+{
+  const uni = new HexTileLayer(stubScene);
+  uni.buildInfinite({ sampler: infSampler, cameraX: 4200, cameraZ: -2600, seaLevel: P.seaLevel, heightScale: P.heightScale, resolution: 2, sunAzimuth: P.sunAzimuth, sunElevation: P.sunElevation, terrainGen: 300 });
+  const uniT = trisOf(uni); uni.dispose();
+  const lod = new HexTileLayer(stubScene);
+  const ms = time(() => lod.buildInfinite({ sampler: infSampler, cameraX: 4200, cameraZ: -2600, seaLevel: P.seaLevel, heightScale: P.heightScale, resolution: 2, lod: true, sunAzimuth: P.sunAzimuth, sunElevation: P.sunElevation, terrainGen: 300 }));
+  const lodT = validate('infinite res2 LOD', lod, 100);
+  console.log(`  infinite res2: uniform ${uniT} → LOD ${lodT} tris (${(100 * lodT / uniT).toFixed(0)}%) · build ${ms.toFixed(1)}ms\n`);
+  lod.dispose();
+}
+
 // signature guard: a 2nd build with identical inputs must NOT rebuild
 const l = new HexTileLayer(stubScene);
 l.buildPlanet({ sampler: planetSampler, radius: P.planetRadius, seaLevel: P.seaLevel, heightScale: P.heightScale, resolution: 1, sunAzimuth: P.sunAzimuth, sunElevation: P.sunElevation, terrainGen: 5 });

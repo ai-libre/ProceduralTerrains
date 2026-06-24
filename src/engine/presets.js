@@ -52,6 +52,7 @@ export const DEFAULT_PARAMS = {
   // sampled from the Noise Stack at each cell center.
   hexTiles: false,
   hexResolution: 1,        // H3 resolution (0..3 for the planet globe)
+  hexLod: true,            // adaptive LOD: finer hexes near camera, coarse far
 
   wireframe: false,
   lodDebug: false,

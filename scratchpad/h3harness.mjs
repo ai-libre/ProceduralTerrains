@@ -23,6 +23,7 @@ import {
   cellToLatLng, cellToBoundary, latLngToXZ,
 } from '../src/engine/h3/h3util.js';
 import { sunDirection } from '../src/engine/h3/HexTileMesh.js';
+import { HexTileLayer } from '../src/engine/h3/HexTileLayer.js';
 
 const MAX_LAND_01 = 1.35;
 
@@ -160,7 +161,7 @@ function renderBoard(p, { res = 0, size = 768 } = {}) {
 }
 
 // ---- planet render (orthographic, painter's algorithm) ----------------------
-function renderPlanet(p, { res = 1, size = 768 } = {}) {
+function renderPlanet(p, { res = 1, size = 768, lod = false } = {}) {
   const boardSize = 2048;
   const u = makeUniforms(p, boardSize);
   const sampler = new PlanetHeightSampler(u, () => ({ octaves: Math.round(p.octaves) }), null);
@@ -173,7 +174,15 @@ function renderPlanet(p, { res = 1, size = 768 } = {}) {
   const up = cross(cam, right);
   const scale = size / (radius * 2.3);
   const project = (x, y, z) => [size / 2 + dot([x, y, z], right) * scale, size / 2 - dot([x, y, z], up) * scale];
-  const cells = planetCells(res);
+  // LOD path reuses the REAL cell-selection logic (refine toward camera + back-cull)
+  let cells;
+  if (lod) {
+    const layer = new HexTileLayer({ add() {}, remove() {} });
+    cells = layer._planetLodCells(res, cam);
+    layer.dispose();
+  } else {
+    cells = planetCells(res);
+  }
   const cd = [0, 0, 0];
   const stat = { cells: 0, drawn: 0, water: 0, hMin: Infinity, hMax: -Infinity, hSum: 0 };
   const tiles = [];
@@ -248,4 +257,5 @@ const b1 = renderBoard(p, { res: 1 }); writePNG(OUT + 'h3-board-res1.png', b1.si
 const pl1 = renderPlanet(p, { res: 1 }); writePNG(OUT + 'h3-planet-res1.png', pl1.size, pl1.size, pl1.buf); logStat('planet res1', pl1.stat);
 const pl2 = renderPlanet(p, { res: 2 }); writePNG(OUT + 'h3-planet-res2.png', pl2.size, pl2.size, pl2.buf); logStat('planet res2', pl2.stat);
 const inf = renderInfinite(p, { res: 1 }); writePNG(OUT + 'h3-infinite-res1.png', inf.size, inf.size, inf.buf); logStat('infinite res1', inf.stat);
+const plLod = renderPlanet(p, { res: 3, lod: true }); writePNG(OUT + 'h3-planet-lod.png', plLod.size, plLod.size, plLod.buf); logStat('planet res3 LOD', plLod.stat);
 console.log('wrote PNGs to', OUT);

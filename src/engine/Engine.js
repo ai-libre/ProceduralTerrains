@@ -588,7 +588,7 @@ export class Engine {
     }
 
     // H3 hex tiles: pure overlay layer — no terrain rebuild, just resync.
-    if (key === 'hexTiles' || key === 'hexResolution') {
+    if (key === 'hexTiles' || key === 'hexResolution' || key === 'hexLod') {
       this._syncHexTiles();
       return;
     }
@@ -2041,6 +2041,7 @@ export class Engine {
         seaLevel: this.params.seaLevel,
         heightScale: this.params.heightScale,
         resolution: Math.round(this.params.hexResolution),
+        lod: this.params.hexLod,
         palette: this.planetStyle?.getStyle?.().palette,
         sunAzimuth: this.params.sunAzimuth,
         sunElevation: this.params.sunElevation,
@@ -2060,6 +2061,8 @@ export class Engine {
         seaLevel: this.params.seaLevel,
         heightScale: this.params.heightScale,
         resolution: Math.round(this.params.hexResolution),
+        lod: this.params.hexLod,
+        cameraPos: [this.camera.position.x, this.camera.position.y, this.camera.position.z],
         palette: this.planetStyle?.getStyle?.().palette,
         sunAzimuth: this.params.sunAzimuth,
         sunElevation: this.params.sunElevation,
@@ -2074,6 +2077,9 @@ export class Engine {
         seaLevel: this.params.seaLevel,
         heightScale: this.params.heightScale,
         resolution: Math.round(this.params.hexResolution),
+        lod: this.params.hexLod,
+        cameraX: this.camera.position.x,
+        cameraZ: this.camera.position.z,
         palette: this.planetStyle?.getStyle?.().palette,
         sunAzimuth: this.params.sunAzimuth,
         sunElevation: this.params.sunElevation,

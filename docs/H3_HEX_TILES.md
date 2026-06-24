@@ -48,8 +48,37 @@ Build time / triangles (one merged mesh = one draw call), single-threaded JS:
 | Infinite | 331 · ~29ms · 6k | 631 · ~25ms · 11k | 1,027 · ~45ms · 18k |
 
 Builds are one-time (signature-guarded), not per-frame; res 2 is flagged "heavy"
-in the UI. Possible future work: off-thread build for the heavy resolutions,
-distance-based LOD between H3 resolutions, and a loading overlay on toggle.
+in the UI.
+
+## Adaptive LOD (iteration on top of the goal)
+H3 is hierarchical, so the tile field mixes resolutions: cells near the camera
+are refined to children (finer), far cells stay coarse, and on the planet the
+back hemisphere is culled. Discrete columns need **no crack-stitching** —
+differently sized hexes sit side by side, walls hiding the height step.
+
+- `HexTileLayer._refine()` recursively subdivides a coarse floor toward a
+  per-cell "desired resolution by distance" (`_planetLodCells` / `_boardLodCells`
+  / `_infiniteLodCells`). Spans: planet/board 2 levels, infinite 1.
+- Camera-driven, so the signature includes a quantized camera (planet: dir
+  rounded to ~7°; board: XZ grid) → rebuilds only when the camera moves enough.
+- Toggle: **Hex Tiles → Adaptive LOD** (param `hexLod`, default on).
+
+Measured (tools/h3verify.mjs, near-res = the UI resolution; % = of uniform tris):
+
+| Case | uniform tris | LOD tris | build (uniform→LOD) |
+|---|---|---|---|
+| Planet res 1 | 16,200 | 1,920 (12%) | 98ms → 7ms |
+| Planet res 2 | 105,840 | 8,760 (8%) | 408ms → 35ms |
+| Planet res 3 | 748,440 | 61,812 (8%) | ~1.5s → 235ms |
+| Board res 2 | 292,539 | 32,205 (11%) | 743ms → 94ms |
+| Infinite res 2 | 18,486 | 6,066 (33%) | 45ms → 14ms |
+
+LOD makes res 3 practical and removes the orbit-hitch concern (builds now
+7–235ms). Verified visually: `.claude/shots/h3-planet-lod.png` shows fine hexes
+at the sub-camera point grading to coarse toward the limb, back side culled.
+
+Possible future work: off-thread build for the heaviest cases, a loading overlay
+on toggle, and frustum (not just hemisphere) culling.
 
 ## Objective feedback loop
 `tools/h3harness.mjs` drives the REAL engine modules (f32-exact CPU samplers +

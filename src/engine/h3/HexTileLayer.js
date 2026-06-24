@@ -17,10 +17,23 @@ import {
   planetCells, cellBoundaryDirs, cellCenterDir,
   patchCells, diskCells, latLngToXZ, cellToLatLng, cellToBoundary,
 } from './h3util.js';
-import { latLngToCell } from 'h3-js';
+import { latLngToCell, cellToChildren } from 'h3-js';
 import { EARTH_PALETTE } from '../style/ColorPalette.js';
 
 const MAX_LAND_01 = 1.35; // heightAt clamps shape to [0,1.35] before scaling
+
+// ---- Adaptive LOD ----------------------------------------------------------
+// H3 is hierarchical, so a tile field can mix resolutions: cells near the
+// camera are refined to children (finer), far cells stay coarse. Discrete
+// columns need no crack-stitching — differently sized hexes just sit side by
+// side, their vertical walls hiding the height step. Span = how many H3 levels
+// the far/coarse floor sits below the near/max resolution.
+const LOD_SPAN_PLANET = 2;
+const LOD_SPAN_BOARD = 2;
+const LOD_SPAN_INF = 1;
+const PLANET_BACK_CULL = -0.15;   // skip cells > ~99° behind the camera
+// per-resolution H3 cell center spacing (degrees) — for infinite LOD ring sizing
+const SPACING_DEG = { 3: 0.3227 / 2.6, 4: 0.3227, 5: 0.1246, 6: 0.0462, 7: 0.0178, 8: 0.0066 };
 
 // Flat board / infinite: H3 cells covering this lat/lng half-window (degrees)
 // are projected (equirectangular, centered on the equator → minimal distortion)
@@ -100,6 +113,10 @@ function mix(a, b, t) {
   return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
 }
 
+// quantize to a grid step (for camera-driven LOD signatures)
+function q(v, step) { return Math.round(v / step); }
+function normalize3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+
 export class HexTileLayer {
   constructor(scene) {
     this.scene = scene;
@@ -131,10 +148,18 @@ export class HexTileLayer {
    * @param {number} [o.sunAzimuth]
    * @param {number} [o.sunElevation]
    * @param {number} [o.terrainGen]  bumps when the height field changed
+   * @param {boolean} [o.lod]        adaptive LOD (finer near camera, back-culled)
+   * @param {number[]} [o.cameraPos] camera world position (required for LOD)
    */
   buildPlanet(o) {
+    const nearRes = clampInt(o.resolution, 0, 3);
+    const lod = !!o.lod && Array.isArray(o.cameraPos);
+    const camDir = lod ? normalize3(o.cameraPos) : [0, 0, 1];
+    // quantize the camera direction so orbiting only rebuilds every ~7°
+    const qd = lod ? `${q(camDir[0], 0.12)},${q(camDir[1], 0.12)},${q(camDir[2], 0.12)}` : 'off';
+
     const sig = [
-      'planet', o.resolution, Math.round(o.radius), Math.round(o.seaLevel),
+      'planet', nearRes, lod ? 1 : 0, qd, Math.round(o.radius), Math.round(o.seaLevel),
       Math.round(o.heightScale), o.sunAzimuth, o.sunElevation, o.terrainGen ?? 0,
     ].join('|');
     if (sig === this._signature && this.mesh) return;
@@ -150,7 +175,7 @@ export class HexTileLayer {
     });
 
     const sampler = o.sampler;
-    const cells = planetCells(o.resolution);
+    const cells = lod ? this._planetLodCells(nearRes, camDir) : planetCells(nearRes);
     const cd = [0, 0, 0];
     for (const h3 of cells) {
       cellCenterDir(h3, cd);
@@ -195,9 +220,16 @@ export class HexTileLayer {
    * @param {number} [o.terrainGen]
    */
   buildBoard(o) {
+    const halfWorld = o.boardSize / 2;
+    const halfDeg = BOARD_PATCH_DEG;
+    const nearAbsRes = BOARD_BASE_RES + clampInt(o.resolution, 0, BOARD_MAX_STEP);
+    const lod = !!o.lod && Number.isFinite(o.cameraX) && Number.isFinite(o.cameraZ);
+    const camX = o.cameraX || 0, camZ = o.cameraZ || 0;
+    const qcam = lod ? `${q(camX, halfWorld * 0.12)},${q(camZ, halfWorld * 0.12)}` : 'off';
+
     const sig = [
-      'board', clampInt(o.resolution, 0, BOARD_MAX_STEP), Math.round(o.boardSize),
-      Math.round(o.seaLevel), Math.round(o.heightScale),
+      'board', clampInt(o.resolution, 0, BOARD_MAX_STEP), lod ? 1 : 0, qcam,
+      Math.round(o.boardSize), Math.round(o.seaLevel), Math.round(o.heightScale),
       o.sunAzimuth, o.sunElevation, o.terrainGen ?? 0,
     ].join('|');
     if (sig === this._signature && this.mesh) return;
@@ -206,15 +238,14 @@ export class HexTileLayer {
     const pal = o.palette || EARTH_PALETTE;
     const sampler = o.sampler;
     const seaLevel = o.seaLevel;
-    const halfWorld = o.boardSize / 2;
-    const halfDeg = BOARD_PATCH_DEG;
-    const absRes = BOARD_BASE_RES + clampInt(o.resolution, 0, BOARD_MAX_STEP);
 
     const builder = new HexTileMeshBuilder({
       sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42),
     });
 
-    const cells = patchCells(absRes, halfDeg);
+    const cells = lod
+      ? this._boardLodCells(nearAbsRes, halfDeg, halfWorld, camX, camZ)
+      : patchCells(nearAbsRes, halfDeg);
     const cxz = [0, 0], p = [0, 0];
     for (const h3 of cells) {
       const [clat, clng] = cellToLatLng(h3);
@@ -263,8 +294,9 @@ export class HexTileLayer {
     const centerLng = clamp(o.cameraX / upd, -179, 179);
     const centerCell = latLngToCell(centerLat, centerLng, step.res);
 
+    const lod = !!o.lod;
     const sig = [
-      'inf', step.res, step.rings, centerCell, Math.round(o.seaLevel),
+      'inf', step.res, step.rings, lod ? 1 : 0, centerCell, Math.round(o.seaLevel),
       Math.round(o.heightScale), o.sunAzimuth, o.sunElevation, o.terrainGen ?? 0,
     ].join('|');
     if (sig === this._signature && this.mesh) return false;
@@ -277,7 +309,9 @@ export class HexTileLayer {
       sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42),
     });
 
-    const cells = diskCells(step.res, centerLat, centerLng, step.rings);
+    const cells = lod
+      ? this._infiniteLodCells(step.res, upd, centerLat, centerLng, o.cameraX, o.cameraZ, step.rings)
+      : diskCells(step.res, centerLat, centerLng, step.rings);
     for (const h3 of cells) {
       const [clat, clng] = cellToLatLng(h3);
       const cx = clng * upd, cz = clat * upd;
@@ -299,6 +333,70 @@ export class HexTileLayer {
 
     this._swapMesh(builder);
     return true;
+  }
+
+  // ---- adaptive LOD cell selection -----------------------------------------
+  // Recursively refine `cell` toward `maxRes`: keep it if its location wants no
+  // more detail, else descend to children. wantRes(cell) → desired final res.
+  _refine(cell, cellRes, maxRes, wantRes, out) {
+    if (cellRes >= maxRes || wantRes(cell) <= cellRes) { out.push(cell); return; }
+    const kids = cellToChildren(cell, cellRes + 1);
+    for (let i = 0; i < kids.length; i++) this._refine(kids[i], cellRes + 1, maxRes, wantRes, out);
+  }
+
+  /** Planet: coarse floor over the globe, refined toward the sub-camera point,
+   *  back hemisphere culled. */
+  _planetLodCells(nearRes, camDir) {
+    const floorRes = Math.max(0, nearRes - LOD_SPAN_PLANET);
+    const out = [];
+    const cd = [0, 0, 0];
+    const want = (cell) => {
+      cellCenterDir(cell, cd);
+      const ang = Math.acos(clamp(cd[0] * camDir[0] + cd[1] * camDir[1] + cd[2] * camDir[2], -1, 1));
+      const r = ang < 0.45 ? nearRes : ang < 0.95 ? nearRes - 1 : floorRes;
+      return clamp(r, floorRes, nearRes);
+    };
+    for (const c of planetCells(floorRes)) {
+      cellCenterDir(c, cd);
+      if (cd[0] * camDir[0] + cd[1] * camDir[1] + cd[2] * camDir[2] < PLANET_BACK_CULL) continue;
+      this._refine(c, floorRes, nearRes, want, out);
+    }
+    return out;
+  }
+
+  /** Board: coarse floor over the patch, refined toward the camera ground point. */
+  _boardLodCells(nearAbsRes, halfDeg, halfWorld, camX, camZ) {
+    const floorRes = Math.max(BOARD_BASE_RES, nearAbsRes - LOD_SPAN_BOARD);
+    const out = [];
+    const xz = [0, 0];
+    const want = (cell) => {
+      const [la, lo] = cellToLatLng(cell);
+      latLngToXZ(la, lo, halfDeg, halfWorld, 0, 0, xz);
+      const dist = Math.hypot(xz[0] - camX, xz[1] - camZ);
+      const r = dist < halfWorld * 0.28 ? nearAbsRes
+        : dist < halfWorld * 0.62 ? nearAbsRes - 1 : floorRes;
+      return clamp(r, floorRes, nearAbsRes);
+    };
+    for (const c of patchCells(floorRes, halfDeg)) this._refine(c, floorRes, nearAbsRes, want, out);
+    return out;
+  }
+
+  /** Infinite: coarse floor disk around the camera, refined near the camera. */
+  _infiniteLodCells(nearRes, upd, centerLat, centerLng, camX, camZ, nearRings) {
+    const floorRes = Math.max(0, nearRes - LOD_SPAN_INF);
+    const worldRadius = nearRings * (SPACING_DEG[nearRes] ?? 0.05) * upd;
+    const floorRings = Math.ceil(worldRadius / ((SPACING_DEG[floorRes] ?? 0.1) * upd)) + 1;
+    const out = [];
+    const want = (cell) => {
+      const [la, lo] = cellToLatLng(cell);
+      const dist = Math.hypot(lo * upd - camX, la * upd - camZ);
+      const r = dist < worldRadius * 0.4 ? nearRes : dist < worldRadius * 0.75 ? nearRes - 1 : floorRes;
+      return clamp(r, floorRes, nearRes);
+    };
+    for (const c of diskCells(floorRes, centerLat, centerLng, floorRings)) {
+      this._refine(c, floorRes, nearRes, want, out);
+    }
+    return out;
   }
 
   _swapMesh(builder) {

@@ -78,11 +78,16 @@ physics use — so tiles match the smooth terrain. Works in all three modes:
 | **Infinite** | a disk around the camera (`gridDisk`) | fixed geo↔world scale; rebuilt when the camera crosses a cell |
 
 Toggle it in the **Planet panel → Hex Tiles (H3)** (also shown in Tile / Infinite
-modes), with a resolution selector. The whole tile field is one merged,
-flat-shaded mesh (sun-baked vertex colors → no extra lights, one draw call).
-Higher resolutions add a one-time build cost (default res rebuilds in ~0.1s; the
-"heavy" options can take a few hundred ms) but never cost anything per frame — a
-signature guard rebuilds only when the terrain or settings actually change.
+modes), with a resolution selector and an **Adaptive LOD** toggle. The whole tile
+field is one merged, flat-shaded mesh (sun-baked vertex colors → no extra lights,
+one draw call). A signature guard rebuilds only when the terrain, settings, or
+(with LOD) the quantized camera actually change — never per frame.
+
+**Adaptive LOD** exploits H3's hierarchy: hexes near the camera are refined to
+finer children, far ones stay coarse, and the back of the planet is culled — so
+you get near-res detail where you look at a fraction of the triangles (e.g.
+planet res 3: 748k → 62k tris, build ~1.5s → ~235ms). Discrete columns need no
+crack-stitching, so mixed resolutions just sit side by side.
 
 Offline tooling (no WebGL needed): `node tools/h3harness.mjs` rasterizes the
 three modes to `.claude/shots/h3-*.png`, and `node tools/h3verify.mjs` validates

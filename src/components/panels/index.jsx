@@ -204,13 +204,21 @@ function HexTilesSection({ params, onParam, worldMode }) {
         info="Render the terrain as discrete H3 hexagonal tiles (board-game look)."
       />
       {params.hexTiles && (
-        <SelectRow
-          label="H3 Resolution"
-          value={Math.round(params.hexResolution ?? 1)}
-          options={opts}
-          onChange={(v) => onParam('hexResolution', Number(v))}
-          info="Higher = smaller, more numerous hexagons (and more triangles)."
-        />
+        <>
+          <SelectRow
+            label="H3 Resolution"
+            value={Math.round(params.hexResolution ?? 1)}
+            options={opts}
+            onChange={(v) => onParam('hexResolution', Number(v))}
+            info="Detail near the camera. Higher = smaller, more numerous hexagons."
+          />
+          <ToggleRow
+            label="Adaptive LOD"
+            value={params.hexLod !== false}
+            onChange={(v) => onParam('hexLod', v)}
+            info="Refine hexes near the camera and coarsen far ones (and cull the far side of the planet) to save triangles."
+          />
+        </>
       )}
     </CollapsibleGroup>
   );

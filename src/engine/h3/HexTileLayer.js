@@ -32,6 +32,9 @@ const LOD_SPAN_PLANET = 2;
 const LOD_SPAN_BOARD = 2;
 const LOD_SPAN_INF = 1;
 const PLANET_BACK_CULL = -0.15;   // skip cells > ~99° behind the camera
+// board-game polish: inset each tile top toward its center so hexes read as
+// discrete beveled pieces with visible gaps
+const TILE_BEVEL = 0.12;
 // per-resolution H3 cell center spacing (degrees) — for infinite LOD ring sizing
 const SPACING_DEG = { 3: 0.3227 / 2.6, 4: 0.3227, 5: 0.1246, 6: 0.0462, 7: 0.0178, 8: 0.0066 };
 
@@ -172,6 +175,7 @@ export class HexTileLayer {
 
     const builder = new HexTileMeshBuilder({
       sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42),
+      bevel: TILE_BEVEL,
     });
 
     const sampler = o.sampler;
@@ -241,6 +245,7 @@ export class HexTileLayer {
 
     const builder = new HexTileMeshBuilder({
       sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42),
+      bevel: TILE_BEVEL,
     });
 
     const cells = lod
@@ -307,6 +312,7 @@ export class HexTileLayer {
     const seaLevel = o.seaLevel;
     const builder = new HexTileMeshBuilder({
       sun: sunDirection(o.sunAzimuth ?? 135, o.sunElevation ?? 42),
+      bevel: TILE_BEVEL,
     });
 
     const cells = lod

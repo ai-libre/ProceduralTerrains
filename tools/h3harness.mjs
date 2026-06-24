@@ -100,6 +100,13 @@ function crc32(buf) { let c = 0xFFFFFFFF; for (let i = 0; i < buf.length; i++) c
 
 // ---- raster helpers ---------------------------------------------------------
 function lin2srgb(v) { v = v <= 0 ? 0 : v >= 1 ? 1 : v; return v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; }
+// mirror HexTileLayer TILE_BEVEL so previews show the tabletop gaps/bevel
+const BEVEL = 0.12;
+function insetPoly(pts, k = BEVEL) {
+  let cx = 0, cy = 0; for (const p of pts) { cx += p[0]; cy += p[1]; } cx /= pts.length; cy /= pts.length;
+  const s = 1 - k;
+  return pts.map((p) => [cx + (p[0] - cx) * s, cy + (p[1] - cy) * s]);
+}
 function makeCanvas(w, h, bg = [10, 12, 18]) {
   const buf = Buffer.alloc(w * h * 3);
   for (let i = 0; i < w * h; i++) { buf[i * 3] = bg[0]; buf[i * 3 + 1] = bg[1]; buf[i * 3 + 2] = bg[2]; }
@@ -155,7 +162,7 @@ function renderBoard(p, { res = 0, size = 768 } = {}) {
     // top-face shade: normal = +Y → ndotl = sun.y; gentle relief tint by height
     const shade = 0.55 + 0.45 * Math.max(sun[1], 0) * (0.7 + 0.3 * Math.min(1, th / (p.heightScale)));
     const ring = cellToBoundary(h3).map(([lat, lng]) => { latLngToXZ(lat, lng, halfDeg, halfWorld, 0, 0, pp); return W2P(pp[0], pp[1]); });
-    fillPoly(buf, size, size, ring, color, shade);
+    fillPoly(buf, size, size, insetPoly(ring), color, shade);
   }
   return { buf, size, stat };
 }
@@ -202,7 +209,7 @@ function renderPlanet(p, { res = 1, size = 768, lod = false } = {}) {
     const biome = sampler.biomeAt3D(cd[0], cd[1], cd[2]).label;
     const color = colorForCell(biome, th, p.seaLevel, p.heightScale, EARTH_PALETTE);
     const shade = 0.32 + 0.68 * Math.max(dot(cd, sun), 0);
-    tiles.push({ depth: dot(cd, cam) * (radius + th), poly, color, shade });
+    tiles.push({ depth: dot(cd, cam) * (radius + th), poly: insetPoly(poly), color, shade });
   }
   tiles.sort((a, b) => a.depth - b.depth); // far first
   for (const t of tiles) fillPoly(buf, size, size, t.poly, t.color, t.shade);
@@ -232,7 +239,7 @@ function renderInfinite(p, { res = 1, size = 768, camX = 4200, camZ = -2600 } = 
     const color = colorForCell(biome, th, p.seaLevel, p.heightScale, EARTH_PALETTE);
     const shade = 0.6 + 0.4 * Math.max(sun[1], 0);
     const ring = cellToBoundary(h3).map(([lat, lng]) => W2P(lng * upd, lat * upd));
-    fillPoly(buf, size, size, ring, color, shade);
+    fillPoly(buf, size, size, insetPoly(ring), color, shade);
   }
   return { buf, size, stat };
 }

@@ -32,11 +32,15 @@ export class HexTileMeshBuilder {
    * @param {number[]} [opts.sun]      sun unit direction (default straight up-ish)
    * @param {number}   [opts.ambient]  ambient floor for the baked shading (0..1)
    * @param {number}   [opts.sideTint] extra darkening of side walls (0..1)
+   * @param {number}   [opts.bevel]    top-face inset toward the cell center
+   *                                    (0..0.4) → discrete "board-game" tiles
+   *                                    with beveled rims + visible gaps
    */
-  constructor({ sun = [0.4, 0.8, 0.45], ambient = 0.38, sideTint = 0.82 } = {}) {
+  constructor({ sun = [0.4, 0.8, 0.45], ambient = 0.38, sideTint = 0.82, bevel = 0 } = {}) {
     this.sun = sun;
     this.ambient = ambient;
     this.sideTint = sideTint;
+    this.bevel = bevel;
     this.positions = [];
     this.colors = [];
     this._cellCount = 0;
@@ -76,15 +80,33 @@ export class HexTileMeshBuilder {
     let cx = 0, cy = 0, cz = 0;
     for (let i = 0; i < n; i++) { cx += top[i][0]; cy += top[i][1]; cz += top[i][2]; }
     const center = [cx / n, cy / n, cz / n];
-    for (let i = 0; i < n; i++) {
-      this._tri(center, top[i], top[(i + 1) % n], color);
+
+    // bevel: inset the top ring toward the centroid so adjacent tiles show a
+    // gap and the rim slopes (beveled) down to the full-width base — the
+    // discrete tabletop-tile look. bevel=0 → the original flush column.
+    let topRing = top;
+    if (this.bevel > 0) {
+      const k = 1 - this.bevel;
+      topRing = new Array(n);
+      for (let i = 0; i < n; i++) {
+        topRing[i] = [
+          center[0] + (top[i][0] - center[0]) * k,
+          center[1] + (top[i][1] - center[1]) * k,
+          center[2] + (top[i][2] - center[2]) * k,
+        ];
+      }
     }
 
-    // side walls: quad per edge (top_i, top_i1, base_i1, base_i) → 2 tris
+    for (let i = 0; i < n; i++) {
+      this._tri(center, topRing[i], topRing[(i + 1) % n], color);
+    }
+
+    // side walls: quad per edge (top_i, top_i1, base_i1, base_i) → 2 tris.
+    // With a bevel the top ring is inset, so the wall slopes outward-downward.
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
-      this._tri(top[i], top[j], base[j], color, this.sideTint);
-      this._tri(top[i], base[j], base[i], color, this.sideTint);
+      this._tri(topRing[i], topRing[j], base[j], color, this.sideTint);
+      this._tri(topRing[i], base[j], base[i], color, this.sideTint);
     }
     this._cellCount++;
   }

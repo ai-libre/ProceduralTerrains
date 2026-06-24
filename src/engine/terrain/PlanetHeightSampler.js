@@ -173,6 +173,17 @@ export class PlanetHeightSampler {
     return f(f(Math.floor(t) + s) / steps);
   }
 
+  /** Dominant biome (+ weights) for a unit direction — mirrors the GLSL/2D classifier. */
+  biomeAt3D(dx, dy, dz) {
+    const c = this._climate(dx, dy, dz);
+    const w = this._biomeWeights(c);
+    let label = 'Forest', score = 0.18;
+    for (const [k, v] of Object.entries(w)) {
+      if (v > score) { score = v; label = k[0].toUpperCase() + k.slice(1); }
+    }
+    return { label, weights: w };
+  }
+
   /** Terrain height (world units) above the base radius, for a unit direction. */
   heightAt3D(dx, dy, dz) {
     const u = this.u;

@@ -63,6 +63,42 @@ mirrors the engine's parameter state and renders the panels.
 - Screenshot (PNG) of the current viewport
 - Heightmap (PNG, 1024², grayscale) rendered orthographically from the same shader
 
+## Hex Tiles (H3)
+
+A toggleable **discrete hex-tile** mode ("board-game" terrain) built on Uber's
+**[H3](https://h3geo.org/)** geospatial grid (`h3-js`). Each H3 cell becomes a
+flat-topped hexagonal column whose **height + biome color come from the Noise
+Stack**, sampled at the cell center by the same f32-exact CPU samplers the
+physics use — so tiles match the smooth terrain. Works in all three modes:
+
+| Mode | H3 source | Mapping |
+|---|---|---|
+| **Planet** | every cell on the globe (`getRes0Cells`→children) | cells stay on the sphere; flat tops via the tangent plane |
+| **Tile** | an equatorial lat/lng patch (`polygonToCells`) | equirectangular projection onto the board's XZ |
+| **Infinite** | a disk around the camera (`gridDisk`) | fixed geo↔world scale; rebuilt when the camera crosses a cell |
+
+Toggle it in the **Planet panel → Hex Tiles (H3)** (also shown in Tile / Infinite
+modes), with a resolution selector and an **Adaptive LOD** toggle. The whole tile
+field is one merged, flat-shaded mesh (sun-baked vertex colors → no extra lights,
+one draw call). A signature guard rebuilds only when the terrain, settings, or
+(with LOD) the quantized camera actually change — never per frame.
+
+**Adaptive LOD** exploits H3's hierarchy: hexes near the camera are refined to
+finer children, far ones stay coarse, and the back of the planet is culled — so
+you get near-res detail where you look at a fraction of the triangles (e.g.
+planet res 3: 748k → 62k tris, build ~1.5s → ~235ms). Discrete columns need no
+crack-stitching, so mixed resolutions just sit side by side.
+
+**Frustum culling**: the field is split into spatial sub-meshes (planet: by H3
+res-0 parent; board/infinite: by a coarse world grid), each frustum-cullable, so
+three.js drops off-screen groups per frame with no rebuild on camera rotation.
+Tiles read as discrete pieces via a small top **bevel/inset**, and enabling/
+re-resolving them is covered by a brief loading overlay.
+
+Offline tooling (no WebGL needed): `node tools/h3harness.mjs` rasterizes the
+three modes to `.claude/shots/h3-*.png`, and `node tools/h3verify.mjs` validates
+geometry + reports build timings.
+
 ## Performance notes
 
 Normals are finite-differenced per fragment (3 height evaluations per pixel), which is

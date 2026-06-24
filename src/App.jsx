@@ -234,9 +234,27 @@ export default function App() {
     planetRadius: 'Resizing planet…', planetFaceGrid: 'Rebuilding planet…',
     chunkCount: 'Rebuilding board…', chunkSize: 'Rebuilding board…',
   };
+  // H3 hex tiles: building the merged tile mesh is synchronous and can take a
+  // few hundred ms at high resolution, so cover it with a blocking overlay —
+  // but only when we're actually building (turning tiles ON, or changing
+  // resolution / LOD while they're ON). Toggling OFF or inert changes are
+  // instant and skip the overlay.
+  const HEX_KEYS = new Set(['hexTiles', 'hexResolution', 'hexLod']);
   const onParam = (key, value) => {
     const eng = engine();
     if (!eng) return;
+    if (HEX_KEYS.has(key)) {
+      const willBuild = key === 'hexTiles' ? value === true : params.hexTiles === true;
+      if (!willBuild) { eng.setParam(key, value); return; }
+      loading.run('hex-build', { blocking: true, label: 'Building hex tiles…', detail: 'Tessellating H3 cells…' }, async (update) => {
+        blockingUpdateRef.current = update;
+        await new Promise((r) => setTimeout(r, 30));  // let the overlay paint first
+        eng.setParam(key, value);                     // synchronous H3 mesh build
+        await new Promise((r) => setTimeout(r, 0));
+        blockingUpdateRef.current = null;
+      });
+      return;
+    }
     if (!HEAVY_PARAMS.has(key)) { eng.setParam(key, value); return; }
     loading.run('param-rebuild', { blocking: true, label: HEAVY_LABEL[key] ?? 'Rebuilding…', detail: 'Generating new geometry…' }, async (update) => {
       blockingUpdateRef.current = update;

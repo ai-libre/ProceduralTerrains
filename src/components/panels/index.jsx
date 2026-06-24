@@ -166,6 +166,64 @@ function WorldPanel({ ctx }) {
   );
 }
 
+const HEX_RES_OPTIONS_PLANET = [
+  { value: 0, label: 'Res 0 — 122 cells (coarse)' },
+  { value: 1, label: 'Res 1 — 842 cells' },
+  { value: 2, label: 'Res 2 — 5,882 cells' },
+  { value: 3, label: 'Res 3 — 41,162 cells (heavy)' },
+];
+
+const HEX_RES_OPTIONS_BOARD = [
+  { value: 0, label: 'Coarse — ~336 tiles' },
+  { value: 1, label: 'Medium — ~2,300 tiles' },
+  { value: 2, label: 'Fine — ~16,000 tiles (heavy)' },
+];
+
+const HEX_RES_OPTIONS_INFINITE = [
+  { value: 0, label: 'Large tiles — ~330 around camera' },
+  { value: 1, label: 'Medium tiles — ~630 around camera' },
+  { value: 2, label: 'Small tiles — ~1,030 around camera' },
+];
+
+function HexTilesSection({ params, onParam, worldMode }) {
+  const isPlanet = worldMode === 'planet';
+  const isInfinite = worldMode === 'infinite';
+  const opts = isPlanet ? HEX_RES_OPTIONS_PLANET
+    : isInfinite ? HEX_RES_OPTIONS_INFINITE : HEX_RES_OPTIONS_BOARD;
+  const subject = isPlanet ? 'globe' : isInfinite ? 'world' : 'board';
+  return (
+    <CollapsibleGroup title="Hex Tiles (H3)" defaultOpen={!!params.hexTiles}>
+      <p className="section-hint">
+        Replace the smooth {subject} with discrete Uber-H3 hexagons — each cell a
+        flat-topped column whose height + color come from the noise layers.
+      </p>
+      <ToggleRow
+        label="Hex Tiles"
+        value={!!params.hexTiles}
+        onChange={(v) => onParam('hexTiles', v)}
+        info="Render the terrain as discrete H3 hexagonal tiles (board-game look)."
+      />
+      {params.hexTiles && (
+        <>
+          <SelectRow
+            label="H3 Resolution"
+            value={Math.round(params.hexResolution ?? 1)}
+            options={opts}
+            onChange={(v) => onParam('hexResolution', Number(v))}
+            info="Detail near the camera. Higher = smaller, more numerous hexagons."
+          />
+          <ToggleRow
+            label="Adaptive LOD"
+            value={params.hexLod !== false}
+            onChange={(v) => onParam('hexLod', v)}
+            info="Refine hexes near the camera and coarsen far ones (and cull the far side of the planet) to save triangles."
+          />
+        </>
+      )}
+    </CollapsibleGroup>
+  );
+}
+
 function PlanetPanel({ ctx }) {
   const isPlanet = ctx.worldMode === 'planet';
   const { title, desc } = getPanelDisplay('planet', ctx.worldMode);
@@ -174,12 +232,18 @@ function PlanetPanel({ ctx }) {
       {isPlanet && (
         <>
           <WorldPanelInner params={ctx.params} worldMode="planet" onParam={ctx.onParam} />
+          <HexTilesSection params={ctx.params} onParam={ctx.onParam} worldMode="planet" />
           <PlanetStylePanel {...ctx.planetStyleProps} settingsTarget={ctx.settingsTarget} embedded />
           <PlanetSummaryCard params={ctx.params} />
         </>
       )}
       {!isPlanet && (
-        <PlanetStylePanel {...ctx.planetStyleProps} settingsTarget={ctx.settingsTarget} embedded paletteOnly />
+        <>
+          {(ctx.worldMode === 'studio' || ctx.worldMode === 'infinite') && (
+            <HexTilesSection params={ctx.params} onParam={ctx.onParam} worldMode={ctx.worldMode} />
+          )}
+          <PlanetStylePanel {...ctx.planetStyleProps} settingsTarget={ctx.settingsTarget} embedded paletteOnly />
+        </>
       )}
       <PanelResetButton label="Reset Planet / Colors Settings" onClick={() => ctx.onResetPanel?.('planet')} settingId="planet.reset" />
     </SidePanel>

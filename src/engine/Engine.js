@@ -4,6 +4,7 @@ import { createWaterMaterial, createInfiniteWaterMaterial, rebuildWaterShaderSou
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
 import { PlanetWorld } from './terrain/PlanetWorld.js';
+import { HexTileLayer } from './h3/HexTileLayer.js';
 import { PlanetCloudChunks } from './sky/PlanetCloudChunks.js';
 import { PlanetCloudLayer } from './sky/PlanetCloudLayer.js';
 import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
@@ -157,6 +158,10 @@ export class Engine {
     this.planetCloudLayer = null;
     this.planetHeightBaker = null;   // bakes the static height field → cubemap
     this._bakedTerrainGen = -1;      // terrain generation the cubemap was baked at
+
+    // H3 discrete hex-tile layer (board-game tiles) — lazily created, shared
+    // across modes; visibility + geometry driven by params.hexTiles
+    this.hexTileLayer = null;
 
     // Studio (flat board) height/normal bake: replaces the per-pixel height
     // field in the studio terrain + water shaders with a single texture fetch.
@@ -579,6 +584,12 @@ export class Engine {
     if (key === 'planetRadius' || key === 'planetFaceGrid') {
       if (this.worldMode === 'planet') this._rebuildPlanet();
       else this._applyUniforms();
+      return;
+    }
+
+    // H3 hex tiles: pure overlay layer — no terrain rebuild, just resync.
+    if (key === 'hexTiles' || key === 'hexResolution' || key === 'hexLod') {
+      this._syncHexTiles();
       return;
     }
 
@@ -1990,6 +2001,124 @@ export class Engine {
     this.planetWater.visible = this.params.seaLevel > 0.5;
   }
 
+  /**
+   * Build / show / hide the H3 discrete hex-tile layer. When hex tiles are on
+   * in planet mode we replace the smooth cube-sphere mesh + water shell with
+   * flat-topped hex columns sampled from the Noise Stack. Cheap to call every
+   * frame — the layer skips rebuilds when nothing relevant changed.
+   * (Phase 1: planet only; board / infinite added in later phases.)
+   */
+  _syncHexTiles() {
+    const supported = this.worldMode === 'planet' || this.worldMode === 'studio'
+      || this.worldMode === 'infinite';
+    const active = !!this.params.hexTiles && supported;
+
+    if (!active) {
+      if (this.hexTileLayer) this.hexTileLayer.setVisible(false);
+      // restore whatever smooth surface this mode hides while hex tiles are on
+      if (this.worldMode === 'planet') {
+        if (this.planetWorld) this.planetWorld.group.visible = true;
+        this._updatePlanetWater();
+      } else if (this.worldMode === 'studio') {
+        if (this.board) this.board.group.visible = true;
+        this.waterSystem?.sync(this.params, this.worldMode);
+      } else if (this.worldMode === 'infinite') {
+        if (this.infiniteWorld) {
+          this.infiniteWorld.group.visible = true;
+          this.waterSystem?.sync(this.params, this.worldMode);
+        }
+      }
+      return;
+    }
+
+    if (!this.hexTileLayer) this.hexTileLayer = new HexTileLayer(this.scene);
+
+    if (this.worldMode === 'infinite') {
+      this.hexTileLayer.buildInfinite({
+        sampler: this._getHexInfiniteSampler(),
+        cameraX: this.camera.position.x,
+        cameraZ: this.camera.position.z,
+        seaLevel: this.params.seaLevel,
+        heightScale: this.params.heightScale,
+        resolution: Math.round(this.params.hexResolution),
+        lod: this.params.hexLod,
+        palette: this.planetStyle?.getStyle?.().palette,
+        sunAzimuth: this.params.sunAzimuth,
+        sunElevation: this.params.sunElevation,
+        terrainGen: this._terrainGen,
+      });
+      if (this.infiniteWorld) this.infiniteWorld.group.visible = false;
+      if (this.infiniteWorld?.waterPlane) this.infiniteWorld.waterPlane.visible = false;
+      this.hexTileLayer.setVisible(true);
+      this._needsRender = true;
+      return;
+    }
+
+    if (this.worldMode === 'planet') {
+      this.hexTileLayer.buildPlanet({
+        sampler: this._getPlanetSampler(),
+        radius: this._planetRadius(),
+        seaLevel: this.params.seaLevel,
+        heightScale: this.params.heightScale,
+        resolution: Math.round(this.params.hexResolution),
+        lod: this.params.hexLod,
+        cameraPos: [this.camera.position.x, this.camera.position.y, this.camera.position.z],
+        palette: this.planetStyle?.getStyle?.().palette,
+        sunAzimuth: this.params.sunAzimuth,
+        sunElevation: this.params.sunElevation,
+        terrainGen: this._terrainGen,
+      });
+      if (this.planetWorld) this.planetWorld.group.visible = false;
+      if (this.planetWater) this.planetWater.visible = false;
+    } else {
+      this.hexTileLayer.buildBoard({
+        sampler: this._getHexBoardSampler(),
+        boardSize: this.boardSize,
+        seaLevel: this.params.seaLevel,
+        heightScale: this.params.heightScale,
+        resolution: Math.round(this.params.hexResolution),
+        lod: this.params.hexLod,
+        cameraX: this.camera.position.x,
+        cameraZ: this.camera.position.z,
+        palette: this.planetStyle?.getStyle?.().palette,
+        sunAzimuth: this.params.sunAzimuth,
+        sunElevation: this.params.sunElevation,
+        terrainGen: this._terrainGen,
+      });
+      if (this.board) this.board.group.visible = false;
+      if (this.water) this.water.visible = false;
+    }
+
+    this.hexTileLayer.setVisible(true);
+    this._needsRender = true;
+  }
+
+  /** CPU height sampler for flat-board hex tiles (tracks the live noise stack). */
+  _getHexBoardSampler() {
+    if (!this._hexBoardSampler) {
+      this._hexBoardSampler = new TerrainHeightSampler(this.uniforms, () => ({
+        octaves: Math.round(this.params.octaves),
+        infinite: false,
+      }), this.noiseStack);
+    } else {
+      this._hexBoardSampler.setStack(this.noiseStack);
+    }
+    return this._hexBoardSampler;
+  }
+
+  /** CPU height sampler for infinite-world hex tiles (no island falloff). */
+  _getHexInfiniteSampler() {
+    if (!this._hexInfiniteSampler) {
+      this._hexInfiniteSampler = new TerrainHeightSampler(this.uniforms, () => ({
+        octaves: Math.round(this.params.octaves),
+        infinite: true,
+      }), this.noiseStack);
+    } else {
+      this._hexInfiniteSampler.setStack(this.noiseStack);
+    }
+    return this._hexInfiniteSampler;
+  }
+
   async _warmupPlanetShaders(oct) {
     const key = `planet:${oct}`;
     if (this._compiledKeys.has(key)) {
@@ -2041,6 +2170,7 @@ export class Engine {
     if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
     if (this.proceduralSky) { this.proceduralSky.dispose(); this.proceduralSky = null; }
     if (this.planetMaterial) { this.planetMaterial.dispose(); this.planetMaterial = null; }
+    if (this.hexTileLayer) { this.hexTileLayer.dispose(); this.hexTileLayer = null; }
   }
 
   // -------------------------------------------------------- infinite controls
@@ -2672,6 +2802,9 @@ export class Engine {
       this.controls.update(dt);
     }
 
+    // keep the hex-tile mesh in sync with live edits (cheap signature guard)
+    if (this.params.hexTiles) this._syncHexTiles();
+
     // FPS accounting runs every tick regardless of whether we draw.
     this._frames++;
     if (now - this._fpsTime >= 1000) {
@@ -2771,6 +2904,9 @@ export class Engine {
       this.infiniteWorld.update(this.camera.position, this.camera);
     }
 
+    // keep the camera-following hex patch in sync (cheap until a new center cell)
+    if (this.params.hexTiles) this._syncHexTiles();
+
     this._maybeWarmUnderwater();
     this.underwater.render(this.renderer, this.scene, this.camera);
     const triangles = this.renderer.info.render.triangles;
@@ -2818,6 +2954,7 @@ export class Engine {
     }
 
     if (this.planetWorld) this.planetWorld.update(this.camera.position, this.camera, this._debug);
+    if (this.params.hexTiles) this._syncHexTiles();
     if (this.planetCloudChunks) {
       this.planetCloudChunks.update(dt, this.camera.position, this.uniforms.uSunDir.value, this.camera, this.planetWorld, this._debug);
     }
@@ -2899,6 +3036,7 @@ export class Engine {
     if (this.worldMode === 'infinite') this._disposeInfinite();
     else if (this.worldMode === 'planet') this._disposePlanet();
     else if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
+    if (this.hexTileLayer) { this.hexTileLayer.dispose(); this.hexTileLayer = null; }
     if (this.studioCloud) { this.studioCloud.dispose(); this.studioCloud = null; }
     if (this.terrainHeightBaker) { this.terrainHeightBaker.dispose(); this.terrainHeightBaker = null; }
     if (this.proceduralSky) { this.proceduralSky.dispose(); this.proceduralSky = null; }
